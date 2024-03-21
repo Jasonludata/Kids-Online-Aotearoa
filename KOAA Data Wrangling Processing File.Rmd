@@ -1,0 +1,189 @@
+---
+title: "KOAA Data Wrangling Processing File"
+author: "Terry Li","Jason Lu"
+date: "`21/01/2024`"
+output: pdf_document
+---
+
+*This markdown file is used to automate the data wrangling process, so the BORIS-coded spreadsheets fo all 47 participants can be cleaned and converted to a single master spreadsheet for the later stage analysis.*
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Preparation:
+
++ Load all the necessary packages:
+
+```{r}
+library(readxl)
+library(lubridate)
+library(stringr)
+library(dplyr)
+library(openxlsx)
+```
+
++ The BORIS coded spreadsheets for each participant have been allocated under corresponding folders, and all the folders have been saved under path: "D:/Kids Online/BORIS Coding Spreadsheets"  
+
++ The complete sequence of steps for organising and cleaning the data, along with clear explanations for each part, is provided in the following code:
+
+```{r}
+# Define the root path:
+root_path <- "D:/Kids Online/BORIS Coding Spreadsheets" 
+
+# Set working directory to the root path:
+setwd(root_path)    
+
+# Extract the list of directories under the root path:
+folder_list <- list.dirs(full.names = FALSE, recursive = FALSE)
+
+# Set up an empty data frame to prepare for later stage binding work: 
+final <- data.frame()
+
+# loop through all the folders to process the coding spreadsheets:
+for(n in 1:length(folder_list)) {
+  
+  # Define temporary path of destination folder for each participant:
+  temp_path <- paste(root_path,"/", folder_list[[n]], sep = "") 
+  
+  # Set temporary working directory:
+  setwd(temp_path)                  
+  
+  # Extract the list of all Excel spreadsheets under the directory
+  file_list <- list.files(pattern = '*.xlsx')                                   
+  
+  # Read all the Excel spreadsheets:
+  data <- lapply(file_list, read_xlsx)
+  
+  # Create an empty vector to store observations that only contain blank behaviour:
+  blank <- vector()                                                              
+  
+  # Inner loop to iterate through every spreadsheet under the specific folder:
+  for(i in 1:length(data)) {
+    
+    # Extract indexes for all the blank observations: 
+    if (nrow(data[[i]]) == 1) {
+      blank <- append(blank, i)                                                  
+    }
+    else {
+      
+      # Split text under "Media file name" column to retrieve useful info :
+      file_name_info <- unlist(strsplit(data[[i]][1,]$`Media file name`, "/"))    
+      
+      # Align observation id to the same naming standard: 
+      data[[i]]$Observation_id <- tail(file_name_info, n = 1)    
+      
+      # Extract participant id 
+      # Also fix naming inconsistency for participant 73 with demographic sheet:
+      pid <- if_else(file_name_info[3] == "OurLady73",  "Ourlady73", 
+                     file_name_info[3])
+      data[[i]]$Participant_id <- pid
+      
+      # Extract number-only identifier:
+      data[[i]]$Num_id <- as.integer(substr(pid, nchar(pid)-1, nchar(pid)))
+      
+      # Extract device info:
+      data[[i]]$Device <- file_name_info[4]       
+      
+      # Extract GMT date time information:
+      date_time_gmt <- ymd_hms(str_sub(unlist(strsplit(tail(file_name_info, n = 1), "_"))[1], 4)) 
+      
+      # Convert GMT date time to NZ date time:
+      data[[i]]$Datetime <- with_tz(date_time_gmt, tz="Pacific/Auckland")                         
+      
+      # Indicate timezone info:
+      data[[i]]$Timezone <- "Pacific/Auckland"   
+      
+      # Convert time column and rename it timestamp to avoid confusion:
+      data[[i]]$Timestamp <- as.double(data[[i]]$Time)                 
+      
+      # Aggregate date time for all the rows:
+      for(j in 2:nrow(data[[i]])) {
+        data[[i]]$Datetime[j] <- data[[i]]$Datetime[1] + data[[i]]$Timestamp[j]             
+      }
+    }
+  }
+  
+  # Skip any participants that did not provide any valuable information:
+  if (length(data) == length(blank)) {
+    next
+  }   
+   
+  # Bind all the processed spreadsheets and exclude all the blank observations:
+  # In case some of the participants didn't have any blank observations:
+  if (length(blank) == 0) {
+  data_update1 <- bind_rows(data)          
+  } else {
+  data_update1 <- bind_rows(data[-blank]) 
+  }
+  
+  data_update2 <- data_update1 %>%
+    
+    # Align fields that could result in inconsistent data types:
+    mutate(Behavioural_track = as.character(`Behavioral category`), 
+           Media_duration = as.numeric(`Media duration (s)`)) %>%
+    
+    # Sort the spreadsheet based on ascending order of "Datetime" column
+    arrange(Datetime)
+  
+  # Split the processed data into two sections so duration of each behaviour can be worked out:
+  # Part 1 only contains all the behaviours that are under track 1 or blank/disengaged:
+  data_part1 <- data_update2 %>%          
+    filter(Behavioural_track == 1 | is.na(Behavioural_track) ) %>%  
+    group_by(Observation_id) %>%
+    
+    # Media duration for each observation is used to calculate the duration of the last behaviour:
+    mutate(Behaviour_duration = lead(Timestamp, default = last(Media_duration)) - Timestamp, 
+           Edu_outlier = NA ) 
+  
+  # Part 2 only contains all the behaviours that are under track 2 or blank/disengaged:
+  data_part2 <- data_update2 %>%
+    filter(Behavioural_track == 2 | is.na(Behavioural_track) ) %>%  
+    group_by(Observation_id) %>%
+    
+    # Set 60 min as threshold to flag any mis-coded Educational behaviours outliers:
+    mutate(Behaviour_duration = lead(Timestamp, default = last(Media_duration)) - Timestamp, 
+           Edu_outlier = if_else(Behavior == "Non-Educational", NA, 
+                                 if_else(Behavior == "Educational" 
+                                         & Behaviour_duration >= 60*60, TRUE, FALSE))) %>%  
+    
+    # Only take track 2 behaviours as Part 1 already contained blank/disengaged behaviours:
+    filter(Behavioural_track == 2)  
+  
+  # Merge Part 1 and Part 2 to form complete data frame:
+  data_update3 <- bind_rows(data_part1, data_part2)  
+  
+  
+  data_final <- data_update3 %>%
+    
+    # Only select columns that are meaningful to the later analytics
+    # Also rename some of the column names to keep the format consistent: 
+    select(Num_id, Participant_id, Observation_id, Device, Behaviour = Behavior, 
+           Behavioural_track, Behaviour_duration, Edu_outlier, Timestamp, 
+           Datetime, Timezone, Obs_duration = `Observation duration`, 
+           Media_duration, Media_file_name =`Media file name`)
+  
+  # Bind the processed data frame towards "final" to create the master data frame: 
+  final <- bind_rows(final, data_final) %>%
+    
+    # Group all the rows by num id and observation id: 
+    group_by(Num_id, Observation_id) %>%
+    
+    # Arrange all the rows by ascending order of num id, observation id and datetime 
+    # within the above groups
+    arrange(Num_id, Observation_id, Datetime)
+}
+
+# Creating file name for the output:
+file_name <- paste("BORIS Cleaned Master Sheet.xlsx")
+
+# Specify file output directory:
+out_dir <- paste(root_path, "/", file_name, sep = "")             
+
+# Finalise the output process:
+write.xlsx(final, file = out_dir)
+
+```
+
++ The fully-cleaned and processed master spreadsheet is then created under the root path.
+

@@ -1,0 +1,134 @@
+---
+title: "Data extract"
+author: "Jason Lu"
+date: "2024-02-29"
+output: html_document
+---
+
+Step 1: define the file path for questionnaire 1 & 2, and the Kids_ID of the 46 participants. 
+```{r}
+
+# Load the dplyr library
+library(dplyr)
+
+# Define the path to the CSV file
+file_path1 <- "C:/Users/Jason/OneDrive/桌面/501/Re_ Request for Demographic Dataset and Questionnaire for Thesis Research/Q1_data.csv"
+file_path2 <- "C:/Users/Jason/OneDrive/桌面/501/Re_ Request for Demographic Dataset and Questionnaire for Thesis Research/Q2_data.csv"
+
+# Define the Kids IDs
+ids_to_select <- c(
+              "Avalon19", "Avalon20", "Avalon21", "Avalon22", "Sacredheart24",
+              "Sacredheart25", "Swis26", "Swis27", "Swis28", "Ferg29", "Ferg30",
+              "Ferg31", "Rar32", "Rar33", "Rar34", "Rar36", "Rar37", "Rar38",
+              "Rar39", "Rar40", "Rar41", "Rkur43", "Rkur46", "Rkur47", "Rkur48",
+              "Rkur49", "Rkur50", "Rkur52", "Brook53", "Brook54", "Brook55",
+              "Brook56", "Brook57", "Brook58", "Otari60", "Otari61", "Papa62",
+              "Papa63", "Swis64", "Swis65", "Swis67", "Swis69", "Swis70", "Swis71",
+              "Swis72", "Ourlady73")
+
+# Read the data from the CSV file
+data1 <- read.csv(file_path1, stringsAsFactors = FALSE)
+data2 <- read.csv(file_path2, stringsAsFactors = FALSE)
+```
+
+Step 2: clean the questionnaire 1 data
+```{r}
+# Filter the data to keep only the specified id_q1 values. Please note id_q1 is the variable name of Kids ID in the original questionnaire 1 data frame
+data1 <- filter(data1, id_q1 %in% ids_to_select)
+
+# 1. Delete columns that are completely empty
+data1 <- data1[, colSums(is.na(data1)) < nrow(data1)]
+
+# 2. Delete rows where 'nz_kids_online_2021_questionnaire_1_timestamp' are '[not completed]'
+data1 <- filter(data1, nz_kids_online_2021_questionnaire_1_timestamp != "[not completed]")
+
+# 3. Delete columns where values are the same
+data1 <- data1[, sapply(data1, function(x) length(unique(x)) > 1)]
+
+# 4. Function to replace non-integer values with NA
+replace_non_integers <- function(x) {
+  if (is.numeric(x) && all(x == floor(x))) {
+    return(x)
+  } else {
+    return(as.integer(NA))
+  }
+}
+
+# Apply the function to columns from D onwards
+data1[4:ncol(data1)] <- lapply(data1[4:ncol(data1)], function(x) ifelse(x == as.integer(x), x, NA))
+
+# Remove columns that are all NA
+data1 <- data1[, colSums(is.na(data1)) < nrow(data1)]
+
+```
+
+
+The code below will extract the well-being data for the selected participants from questionnaire 1&2
+
+```{r}
+# Here I filter out records where nz_kids_online_2021_questionnaire_2_timestamp is '[not completed]'; exclude the sleep data, which will form a seperate data frame; and select only the rows with the defined IDs
+
+mental_wellbeing_data <- data2 %>%
+  filter(nz_kids_online_2021_questionnaire_2_timestamp != "[not completed]") %>%
+  filter(Kids_ID %in% ids_to_select) %>%
+  select(
+    -wake_schlday,
+    -bed_schlnight,
+    -sleep_schlnight,
+    -wake_satam,
+    -bed_satpm,
+    -sleep_satpm,
+    -wake_sunam,
+    -bed_sunpm,
+    -sleep_sunpm,
+    -recency_device,
+    -device_check,
+    -device_checkyes,
+    -pm_for_day_2,
+    -nz_kids_online_2021_questionnaire_2_complete,
+    -redcap_survey_identifier,
+    -nz_kids_online_2021_questionnaire_2_timestamp
+  ) %>%
+  left_join(
+    select(data1, 
+           id_q1, 
+           who5_21a, 
+           who5_21b, 
+           who5_21c, 
+           who5_21d, 
+           who5_21e
+    ),
+    by = c("Kids_ID" = "id_q1")
+  )
+
+# Write the cleaned data to a new CSV file. It is named mental_wellbeing_data
+write.csv(mental_wellbeing_data, "C:/Users/Jason/OneDrive/桌面/501/Re_ Request for Demographic Dataset and Questionnaire for Thesis Research/Q2/mental_wellbeing_data.csv", row.names = FALSE)
+
+
+```
+
+The below operation extracts sleep_data. This data frame will be used in a separate markdown document 
+```{r}
+
+sleep_data <- data2 %>%
+  filter(nz_kids_online_2021_questionnaire_2_timestamp != "[not completed]") %>%
+  filter(Kids_ID %in% ids_to_select) %>%
+  select(
+    record_id,
+    Kids_ID,
+    wake_schlday,
+    bed_schlnight,
+    sleep_schlnight,
+    wake_satam,
+    bed_satpm,
+    sleep_satpm,
+    wake_sunam,
+    bed_sunpm,
+    sleep_sunpm,
+    recency_device,
+    device_check
+  )
+
+write.csv(sleep_data, "C:/Users/Jason/OneDrive/桌面/501/Re_ Request for Demographic Dataset and Questionnaire for Thesis Research/RQ3/sleep_data.csv", row.names = FALSE)
+
+```

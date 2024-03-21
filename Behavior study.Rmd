@@ -1,0 +1,2513 @@
+---
+title: "behavior_EDA"
+author: "Jason Lu"
+date: "2024-01-26"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+library(readxl)
+library(dplyr)
+library(gridExtra)
+library(ggplot2)
+library(tidyr)
+library(grid)
+```
+
+
+The first step is to read the cleaned data for all 46 kids and test if the number of kids are correct 
+```{r}
+
+
+# Load the observation data
+observation_data <- read_excel("D:/Kids Online/BORIS Cleaned Master Sheet.xlsx")
+
+#fix the data inconsistency issue. This will be helpful when merging the behavior data with other datasets
+# 1. Replace 'OTAR60' with 'OTARI60', and 'OTAR61' with 'OTARI61'
+observation_data$Participant_id <- gsub("OTAR60", "OTARI60", observation_data$Participant_id)
+observation_data$Participant_id <- gsub("OTAR61", "OTARI61", observation_data$Participant_id)
+
+# 2. Capitalize only the first letter of each value in the Participant_id column
+observation_data$Participant_id <- tolower(observation_data$Participant_id) # First, make all letters lowercase
+observation_data$Participant_id <- tools::toTitleCase(observation_data$Participant_id) # Then capitalize the first letter
+
+# Count the number of unique Participant Id
+number_of_unique_participants <- n_distinct(observation_data$`Participant_id`)
+
+# Display the result
+print(number_of_unique_participants)
+
+# Get the unique Participant Id
+unique_participants <- unique(observation_data$`Participant_id`)
+
+# Display the unique Participant Ids
+print(unique_participants)
+
+```
+
+
+
+calculate the total duration excluding Blank/Disengaged for each unique Participant Id
+```{r}
+
+# Filter out rows where Behaviour is "Blank/Disengaged"
+observation_data <- filter(observation_data, Behaviour != "Blank/Disengaged")
+
+# Further filter to include only rows where Behavioural_track is 1
+observation_data_filtered <- filter(observation_data, Behavioural_track == 1)
+
+# Group by Participant_id and summarise to calculate total duration for Behavioural_track == 1
+total_duration_by_participant <- observation_data_filtered %>%
+  group_by(Participant_id) %>%
+  summarise(Total_Duration = sum(Behaviour_duration, na.rm = TRUE))
+
+# Display the result
+print(total_duration_by_participant)
+
+
+```
+
+
+calculate the total non-educational duration for each unique Participant Id. 
+
+```{r}
+
+non_educational_duration_by_participant <- observation_data %>%
+  group_by(`Participant_id`) %>%
+  summarise(Total_Non_Educational_Duration = sum(ifelse(`Behaviour` == "Non-Educational", `Behaviour_duration`, 0), na.rm = TRUE))
+
+
+# Display the result
+print(non_educational_duration_by_participant)
+
+```
+
+
+Now, I create a new data set to record the relative measurement of children behavior. The reason I focus on relative measurement is that it makes meaningful comparisons across different scales
+```{r}
+# Merge the two datasets and rename as behaviour_summary
+behaviour_summary <- merge(total_duration_by_participant, non_educational_duration_by_participant, by = "Participant_id")
+
+# Calculate %Non_Educational
+behaviour_summary <- behaviour_summary %>%
+  mutate(Non_Educational_Percentage = (Total_Non_Educational_Duration / Total_Duration) * 100)
+
+
+# Selecting only Participant_id and %Non_Educational
+behaviour_summary <- select(behaviour_summary, Participant_id, Non_Educational_Percentage)
+
+# Display the final dataframe
+print(behaviour_summary)
+
+
+```
+
+```{r}
+library(dplyr)
+
+# Filter to include only rows where Behavioural_track is 1
+observation_data_filtered <- filter(observation_data, Behavioural_track == 1)
+
+# 1. Calculate number_of_observations and Total_Duration simultaneously
+behaviour_summary_1 <- observation_data_filtered %>%
+  group_by(Participant_id) %>%
+  summarise(number_of_observations = n(),
+            Total_Duration = sum(Behaviour_duration, na.rm = TRUE))
+
+# Calculate mean_session_duration
+behaviour_summary_1 <- behaviour_summary_1 %>%
+  mutate(mean_session_duration = Total_Duration / number_of_observations)
+
+# 2. Calculate the standard deviation of Behaviour_duration for each Participant_id
+std_dev_behaviour_duration <- observation_data_filtered %>%
+  group_by(Participant_id) %>%
+  summarise(std_dev_Behaviour_duration = sd(Behaviour_duration, na.rm = TRUE))
+
+# merge behaviour_summary_1 and std_dev_behaviour_duration
+intermediate_summary <- merge(behaviour_summary_1, std_dev_behaviour_duration, by = "Participant_id")
+
+# Then merge the result with behaviour_summary
+behaviour_summary <- merge(intermediate_summary, behaviour_summary, by = "Participant_id")
+
+# Display the behaviour_summary dataframe
+print(behaviour_summary)
+
+```
+
+Now, we create two seperate variables called Total_TikTok_Duration and Total_Duration_ex_TikTok
+```{r}
+
+# Calculate total duration for TikTok for each Participant_id
+TikTok_duration <- observation_data %>%
+  filter(Behaviour %in% c("TikTok")) %>%
+  group_by(Participant_id) %>%
+  summarise(Total_TikTok_Duration = sum(Behaviour_duration, na.rm = TRUE))
+
+# Merge this with behaviour_summary and calculate Total_Duration_ex_TikTok
+behaviour_summary <- merge(behaviour_summary, TikTok_duration, by = "Participant_id", all = TRUE) %>%
+  mutate(Total_Duration_ex_TikTok = Total_Duration - ifelse(is.na(Total_TikTok_Duration), 0, Total_TikTok_Duration))
+
+# Add the ex_TikTok_percentage column
+behaviour_summary <- behaviour_summary %>%
+  mutate(ex_TikTok_percentage = (Total_Duration_ex_TikTok / Total_Duration) * 100)
+
+# Add TikTok_Duration_Percentage column
+behaviour_summary <- behaviour_summary %>%
+  mutate(TikTok_Duration_Percentage = 100 - ex_TikTok_percentage)
+
+# Print the updated behaviour_summary
+print(behaviour_summary)
+
+```
+
+Add a new variable tiktok_Session_Count to behaviour_summary
+```{r}
+
+tiktok_Session_Count <- observation_data %>%
+  filter(Behaviour %in% c("TikTok")) %>%
+  group_by(Participant_id) %>%
+  summarise(TikTok_Session_Count = n())
+
+behaviour_summary <- merge(behaviour_summary, tiktok_Session_Count, by = "Participant_id", all.x = TRUE)
+
+print(behaviour_summary)
+```
+
+now, add a new variable called  mean_TikTok_duration
+```{r}
+
+behaviour_summary <- behaviour_summary %>%
+  mutate(mean_TikTok_duration = ifelse(TikTok_Session_Count > 0, Total_TikTok_Duration / TikTok_Session_Count, NA))
+
+# Print the updated behaviour_summary
+print(behaviour_summary)
+```
+
+I am also interetsed to look into another behavior - gaming. I hereby create two variables mean_Gaming_duration and Gaming_Duration_Percentage
+
+```{r}
+
+# Calculate variables for Gaming
+gaming_stats <- observation_data %>%
+  filter(Behaviour == "Gaming") %>%
+  group_by(Participant_id) %>%
+  summarise(
+    Total_Gaming_Duration = sum(Behaviour_duration, na.rm = TRUE),
+    Gaming_Session_Count = n(),
+    mean_Gaming_duration = mean(Behaviour_duration, na.rm = TRUE)
+  )
+
+# Merge gaming_stats into behaviour_summary
+behaviour_summary <- merge(behaviour_summary, gaming_stats, by = "Participant_id", all.x = TRUE)
+
+# Calculate Gaming_Duration_Percentage and add it to behaviour_summary
+behaviour_summary$Gaming_Duration_Percentage <- (behaviour_summary$Total_Gaming_Duration / behaviour_summary$Total_Duration) * 100
+
+# Display the updated behaviour_summary dataframe
+print(behaviour_summary)
+
+
+```
+
+Lastly, I add relative measures of YouTube
+```{r}
+# Calculate variables for YouTube
+youtube_stats <- observation_data %>%
+  filter(Behaviour == "Youtube") %>%
+  group_by(Participant_id) %>%
+  summarise(
+    Total_YouTube_Duration = sum(Behaviour_duration, na.rm = TRUE),
+    YouTube_Session_Count = n(),
+    mean_YouTube_duration = mean(Behaviour_duration, na.rm = TRUE)
+  )
+
+# Merge youtube_stats into behaviour_summary
+behaviour_summary <- merge(behaviour_summary, youtube_stats, by = "Participant_id", all.x = TRUE)
+
+# Calculate YouTube_Duration_Percentage and add it to behaviour_summary
+behaviour_summary$YouTube_Duration_Percentage <- (behaviour_summary$Total_YouTube_Duration / behaviour_summary$Total_Duration) * 100
+
+# Display the updated behaviour_summary dataframe
+print(behaviour_summary)
+
+```
+
+
+
+Finally, merge behaviour_summary with wellbeing, demo and sleep data. This will be the data frame for final statistical testing. 
+```{r}
+
+# Merge behaviour_summary into wellbeing_demo2024
+behaviour_wellbeing_analysis <- merge(wellbeing_demo_sleep2024, behaviour_summary, by.x = "Kids_ID", by.y = "Participant_id")
+
+#fill NA values with 0
+behaviour_wellbeing_analysis[] <- lapply(behaviour_wellbeing_analysis, function(x) replace(x, is.na(x), 0))
+
+behaviour_wellbeing_analysis
+
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+I calculate the proporation of TikTok + YouTube + Gaming in children's total screen time. This justified the choice of these three apps for further statistical testing
+```{r}
+# Calculate the sum of Total_TikTok_Duration, Total_Gaming_Duration, and Total_YouTube_Duration
+selected_behaviour_duration <- sum(behaviour_wellbeing_analysis$Total_TikTok_Duration) +sum(behaviour_wellbeing_analysis$Total_YouTube_Duration)+sum(behaviour_wellbeing_analysis$Total_Gaming_Duration)
+  
+# Calculate the sum of Total_Duration
+all_behaviour_duration <- sum(behaviour_wellbeing_analysis$Total_Duration, na.rm = TRUE)
+
+# Calculate the ratio
+ratio_behaviour_duration <- selected_behaviour_duration / all_behaviour_duration
+
+# Print the result
+print(ratio_behaviour_duration)
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+before we start our analysis, we should check the nomality of numerical variables which will be tested in the following study. They are: 
+	mean_TikTok_duration (numerical)
+	TikTok_Duration_Percentage (numerical)
+	mean_Gaming_duration (numerical)
+	Gaming_Duration_Percentage (numerical)
+	mean_YouTube_duration (numerical)
+	YouTube_Duration_Percentage (numerical)
+```{r}
+# Shapiro-Wilk test for mean_TikTok_duration
+shapiro_test_mean_TikTok_duration <- shapiro.test(behaviour_wellbeing_analysis$mean_TikTok_duration)
+
+# Shapiro-Wilk test for TikTok_Duration_Percentage
+shapiro_test_TikTok_Duration_Percentage <- shapiro.test(behaviour_wellbeing_analysis$TikTok_Duration_Percentage)
+
+# Shapiro-Wilk test for mean_Gaming_duration
+shapiro_test_mean_Gaming_duration <- shapiro.test(behaviour_wellbeing_analysis$mean_Gaming_duration)
+
+# Shapiro-Wilk test for Gaming_Duration_Percentage
+shapiro_test_Gaming_Duration_Percentage <- shapiro.test(behaviour_wellbeing_analysis$Gaming_Duration_Percentage)
+
+# Shapiro-Wilk test for mean_YouTube_duration
+shapiro_test_mean_YouTube_duration <- shapiro.test(behaviour_wellbeing_analysis$mean_YouTube_duration)
+
+# Shapiro-Wilk test for YouTube_Duration_Percentage
+shapiro_test_YouTube_Duration_Percentage <- shapiro.test(behaviour_wellbeing_analysis$YouTube_Duration_Percentage)
+
+# Print the results
+print(shapiro_test_mean_TikTok_duration)
+print(shapiro_test_TikTok_Duration_Percentage)
+print(shapiro_test_mean_Gaming_duration)
+print(shapiro_test_Gaming_Duration_Percentage)
+print(shapiro_test_mean_YouTube_duration)
+print(shapiro_test_YouTube_Duration_Percentage)
+```
+
+
+
+Shapiro-Wilk normality test results suggests none is normally distributed. We can also visualise their distributions using histograms. Apparently, they are skewed. 
+
+```{r}
+# Histogram for mean_TikTok_duration
+hist(behaviour_wellbeing_analysis$mean_TikTok_duration, main="Histogram of mean_TikTok_duration", xlab="Mean TikTok Duration", col="blue", border="black")
+
+# Histogram for TikTok_Duration_Percentage
+hist(behaviour_wellbeing_analysis$TikTok_Duration_Percentage, main="Histogram of TikTok_Duration_Percentage", xlab="TikTok Duration Percentage", col="green", border="black")
+
+# Histogram for mean_Gaming_duration
+hist(behaviour_wellbeing_analysis$mean_Gaming_duration, main="Histogram of mean_Gaming_duration", xlab="Mean Gaming Duration", col="red", border="black")
+
+# Histogram for Gaming_Duration_Percentage
+hist(behaviour_wellbeing_analysis$Gaming_Duration_Percentage, main="Histogram of Gaming_Duration_Percentage", xlab="Gaming Duration Percentage", col="purple", border="black")
+
+# Histogram for mean_YouTube_duration
+hist(behaviour_wellbeing_analysis$mean_YouTube_duration, main="Histogram of mean_YouTube_duration", xlab="Mean YouTube Duration", col="orange", border="black")
+
+# Histogram for YouTube_Duration_Percentage
+hist(behaviour_wellbeing_analysis$YouTube_Duration_Percentage, main="Histogram of YouTube_Duration_Percentage", xlab="YouTube Duration Percentage", col="yellow", border="black")
+
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+Before the analysis, we make categorical variables in behaviour_wellbeing_analysis as factors
+```{r}
+behaviour_wellbeing_analysis$Gender <- factor(behaviour_wellbeing_analysis$Gender)
+behaviour_wellbeing_analysis$Ethnic.group <- factor(behaviour_wellbeing_analysis$Ethnic.group)
+behaviour_wellbeing_analysis$Decile_group <- factor(behaviour_wellbeing_analysis$Decile_group)
+behaviour_wellbeing_analysis$anxiety_level <- factor(behaviour_wellbeing_analysis$anxiety_level)
+behaviour_wellbeing_analysis$depression_level <- factor(behaviour_wellbeing_analysis$depression_level)
+behaviour_wellbeing_analysis$Underslept <- factor(behaviour_wellbeing_analysis$Underslept)
+
+```
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+1, TikTok ~ undersleep across genders 
+
+first of all, we visualize if each level has enough data for statistical testing. 
+
+```{r}
+males_data <- behaviour_wellbeing_analysis %>%
+  filter(Gender == "Male")
+
+females_data <- behaviour_wellbeing_analysis %>%
+  filter(Gender == "Female")
+
+create_undersleep_gender_plot <- function(data, gender_name, palette_color) {
+  ggplot(data, aes(x = Underslept, fill = Underslept)) +
+    geom_bar() +
+    geom_text(stat = 'count', aes(label = ..count..), vjust = -0.3, color = "black") +
+    labs(title = paste("Undersleep Status Among", gender_name, "Participants"),
+         x = "Undersleep Status", y = "Count") +
+    scale_fill_brewer(palette = palette_color, name = "Undersleep Status") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+all_undersleep_plot <- create_undersleep_gender_plot(behaviour_wellbeing_analysis, "All", "Purples")
+male_undersleep_plot <- create_undersleep_gender_plot(males_data, "Male", "Blues")
+female_undersleep_plot <- create_undersleep_gender_plot(females_data, "Female", "Reds")
+
+# Print the plots
+print(male_undersleep_plot)
+print(female_undersleep_plot)
+print(all_undersleep_plot)
+
+```
+Then, use the Mann-Whitney-Wilcoxon test given undersleep status has two levels 
+
+```{r}
+
+# Mann-Whitney-Wilcoxon Test for mean_TikTok_duration by Underslept across all participants
+mw_mean_TikTok_all <- wilcox.test(mean_TikTok_duration ~ Underslept, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney-Wilcoxon Test for mean_TikTok_duration by Underslept for male participants
+mw_mean_TikTok_male <- wilcox.test(mean_TikTok_duration ~ Underslept, data = males_data)
+
+# Mann-Whitney-Wilcoxon Test for mean_TikTok_duration by Underslept for female participants
+mw_mean_TikTok_female <- wilcox.test(mean_TikTok_duration ~ Underslept, data = females_data)
+
+# Mann-Whitney-Wilcoxon Test for TikTok_Duration_Percentage by Underslept across all participants
+mw_TikTok_Percentage_all <- wilcox.test(TikTok_Duration_Percentage ~ Underslept, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney-Wilcoxon Test for TikTok_Duration_Percentage by Underslept for male participants
+mw_TikTok_Percentage_male <- wilcox.test(TikTok_Duration_Percentage ~ Underslept, data = males_data)
+
+# Mann-Whitney-Wilcoxon Test for TikTok_Duration_Percentage by Underslept for female participants
+mw_TikTok_Percentage_female <- wilcox.test(TikTok_Duration_Percentage ~ Underslept, data = females_data)
+
+# Store the p-values in a list
+TikTok_mw_summaries <- list(
+  mean_TikTok_duration_all = mw_mean_TikTok_all$p.value,
+  mean_TikTok_duration_males = mw_mean_TikTok_male$p.value,
+  mean_TikTok_duration_females = mw_mean_TikTok_female$p.value,
+  TikTok_Duration_Percentage_all = mw_TikTok_Percentage_all$p.value,
+  TikTok_Duration_Percentage_males = mw_TikTok_Percentage_male$p.value,
+  TikTok_Duration_Percentage_females = mw_TikTok_Percentage_female$p.value
+)
+
+# Print the p-values
+cat("P-values for Mann-Whitney-Wilcoxon Tests:\n")
+for (name in names(TikTok_mw_summaries)) {
+  cat(name, ":", TikTok_mw_summaries[[name]], "\n")
+}
+
+```
+
+
+```{r}
+
+library(ggplot2)
+library(gridExtra)
+
+# Plot for all participants - Mean TikTok Duration
+TikTok_plot_all <- ggplot(behaviour_wellbeing_analysis, aes(x = Underslept, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Mean TikTok Duration",
+       x = "Underslept",
+       y = "Mean TikTok Duration") +
+  theme_minimal()
+
+# Plot for male participants - Mean TikTok Duration
+TikTok_plot_males_mean <- ggplot(males_data, aes(x = Underslept, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Mean TikTok Duration",
+       x = "Underslept",
+       y = "Mean TikTok Duration") +
+  theme_minimal()
+
+# Plot for female participants - Mean TikTok Duration
+TikTok_plot_females_mean <- ggplot(females_data, aes(x = Underslept, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Mean TikTok Duration",
+       x = "Underslept",
+       y = "Mean TikTok Duration") +
+  theme_minimal()
+
+# Plot for all participants - TikTok Duration Percentage
+TikTok_plot_all_percentage <- ggplot(behaviour_wellbeing_analysis, aes(x = Underslept, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - TikTok Duration Percentage",
+       x = "Underslept",
+       y = "TikTok Duration Percentage") +
+  theme_minimal()
+
+# Plot for male participants - TikTok Duration Percentage
+TikTok_plot_males_percentage <- ggplot(males_data, aes(x = Underslept, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - TikTok Duration Percentage",
+       x = "Underslept",
+       y = "TikTok Duration Percentage") +
+  theme_minimal()
+
+# Plot for female participants - TikTok Duration Percentage
+TikTok_plot_females_percentage <- ggplot(females_data, aes(x = Underslept, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - TikTok Duration Percentage",
+       x = "Underslept",
+       y = "TikTok Duration Percentage") +
+  theme_minimal()
+
+# Combine and display the plots
+TikTok_plots_combined <- arrangeGrob(
+  TikTok_plot_all, TikTok_plot_males_mean, TikTok_plot_females_mean,
+  TikTok_plot_all_percentage, TikTok_plot_males_percentage, TikTok_plot_females_percentage,
+  nrow = 2
+)
+
+
+ggsave("combined_plots_TikTok_Undersleep.png", TikTok_plots_combined, width = 20, height = 12, unit = "in")
+
+```
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+
+2, TikTok ~ depression_level_bi (PHQ9 test) across genders
+
+```{r}
+
+create_depression_gender_phq9_plot <- function(data, gender_name, palette_color) {
+  ggplot(data, aes(x = depression_level_bi, fill = depression_level_bi)) + 
+    geom_bar() +
+    geom_text(stat = 'count', aes(label = ..count..), vjust = -0.3, color = "black") +
+    labs(title = paste("Depression Level (PHQ-9) Among", gender_name, "Participants"),
+         x = "Depression Level (PHQ-9)", y = "Count") +
+    scale_fill_brewer(palette = palette_color, name = "Depression Level (PHQ-9)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+
+
+all_depression_phq9_plot <- create_depression_gender_phq9_plot(behaviour_wellbeing_analysis, "All", "Purples")
+male_depression_phq9_plot <- create_depression_gender_phq9_plot(males_data, "Male", "Blues")
+female_depression_phq9_plot <- create_depression_gender_phq9_plot(females_data, "Female", "Reds")
+
+# Print the plots
+print(male_depression_phq9_plot)
+print(female_depression_phq9_plot)
+print(all_depression_phq9_plot)
+```
+
+```{r}
+# Mann-Whitney U Test for mean_TikTok_duration by depression_level_bi (All participants)
+wilcox_mean_TikTok_all_depression <- wilcox.test(mean_TikTok_duration ~ depression_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for mean_TikTok_duration by depression_level_bi (Male participants)
+wilcox_mean_TikTok_male_depression <- wilcox.test(mean_TikTok_duration ~ depression_level_bi, data = males_data)
+
+# Mann-Whitney U Test for mean_TikTok_duration by depression_level_bi (Female participants)
+wilcox_mean_TikTok_female_depression <- wilcox.test(mean_TikTok_duration ~ depression_level_bi, data = females_data)
+
+# Mann-Whitney U Test for TikTok_Duration_Percentage by depression_level_bi (All participants)
+wilcox_TikTok_Percentage_all_depression <- wilcox.test(TikTok_Duration_Percentage ~ depression_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for TikTok_Duration_Percentage by depression_level_bi (Male participants)
+wilcox_TikTok_Percentage_male_depression <- wilcox.test(TikTok_Duration_Percentage ~ depression_level_bi, data = males_data)
+
+# Mann-Whitney U Test for TikTok_Duration_Percentage by depression_level_bi (Female participants)
+wilcox_TikTok_Percentage_female_depression <- wilcox.test(TikTok_Duration_Percentage ~ depression_level_bi, data = females_data)
+
+# Store the p-values in a list for each analysis
+TikTok_wilcox_summaries_depression_gender <- list(
+  All_mean_TikTok_duration_depression_bi = wilcox_mean_TikTok_all_depression$p.value,
+  Male_mean_TikTok_duration_depression_bi = wilcox_mean_TikTok_male_depression$p.value,
+  Female_mean_TikTok_duration_depression_bi = wilcox_mean_TikTok_female_depression$p.value,
+  All_TikTok_Duration_Percentage_depression_bi = wilcox_TikTok_Percentage_all_depression$p.value,
+  Male_TikTok_Duration_Percentage_depression_bi = wilcox_TikTok_Percentage_male_depression$p.value,
+  Female_TikTok_Duration_Percentage_depression_bi = wilcox_TikTok_Percentage_female_depression$p.value
+)
+
+# Print the p-values for each Mann-Whitney U test based on depression_level_bi across gender and overall
+cat("P-values for Mann-Whitney U Tests with Depression Level Bi across Gender and Overall:\n")
+for (name in names(TikTok_wilcox_summaries_depression_gender)) {
+  cat(name, ":", TikTok_wilcox_summaries_depression_gender[[name]], "\n")
+}
+
+```
+
+```{r}
+# Plot for all participants - Mean TikTok Duration by Depression Level Bi
+TikTok_plot_all_mean_depression_bi <- ggplot(behaviour_wellbeing_analysis, aes(x = depression_level_bi, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Mean TikTok Duration by Depression Level Bi",
+       x = "Depression Level Bi",
+       y = "Mean TikTok Duration") +
+  theme_minimal()
+
+# Plot for male participants - Mean TikTok Duration by Depression Level Bi
+TikTok_plot_males_mean_depression_bi <- ggplot(males_data, aes(x = depression_level_bi, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Mean TikTok Duration by Depression Level Bi",
+       x = "Depression Level Bi",
+       y = "Mean TikTok Duration") +
+  theme_minimal()
+
+# Plot for female participants - Mean TikTok Duration by Depression Level Bi
+TikTok_plot_females_mean_depression_bi <- ggplot(females_data, aes(x = depression_level_bi, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Mean TikTok Duration by Depression Level Bi",
+       x = "Depression Level Bi",
+       y = "Mean TikTok Duration") +
+  theme_minimal()
+
+# Plot for all participants - TikTok Duration Percentage by Depression Level Bi
+TikTok_plot_all_percentage_depression_bi <- ggplot(behaviour_wellbeing_analysis, aes(x = depression_level_bi, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - TikTok Duration Percentage by Depression Level Bi",
+       x = "Depression Level Bi",
+       y = "TikTok Duration Percentage") +
+  theme_minimal()
+
+# Plot for male participants - TikTok Duration Percentage by Depression Level Bi
+TikTok_plot_males_percentage_depression_bi <- ggplot(males_data, aes(x = depression_level_bi, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - TikTok Duration Percentage by Depression Level Bi",
+       x = "Depression Level Bi",
+       y = "TikTok Duration Percentage") +
+  theme_minimal()
+
+# Plot for female participants - TikTok Duration Percentage by Depression Level Bi
+TikTok_plot_females_percentage_depression_bi <- ggplot(females_data, aes(x = depression_level_bi, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - TikTok Duration Percentage by Depression Level Bi",
+       x = "Depression Level Bi",
+       y = "TikTok Duration Percentage") +
+  theme_minimal()
+
+# Combine and display the plots
+TikTok_plots_combined_bi <- arrangeGrob(
+  TikTok_plot_all_mean_depression_bi, TikTok_plot_males_mean_depression_bi, TikTok_plot_females_mean_depression_bi,
+  TikTok_plot_all_percentage_depression_bi, TikTok_plot_males_percentage_depression_bi, TikTok_plot_females_percentage_depression_bi,
+  nrow = 2
+)
+
+# Save the combined plots
+ggsave("combined_plots_TikTok_Depression_Bi.png", TikTok_plots_combined_bi, width = 20, height = 12, unit = "in")
+
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+3, TikTok ~ anxiety_level across genders
+```{r}
+create_anxiety_gender_plot <- function(data, gender_name, palette_color) {
+  ggplot(data, aes(x = anxiety_level_bi, fill = anxiety_level_bi)) + # Updated to use anxiety_level_bi
+    geom_bar() +
+    geom_text(stat = 'count', aes(label = ..count..), vjust = -0.3, color = "black") +
+    labs(title = paste("Anxiety Level (GAD-7) Among", gender_name, "Participants"),
+         x = "Anxiety Level Bi", y = "Count") + # Updated label for clarity
+    scale_fill_brewer(palette = palette_color, name = "Anxiety Level Bi") + # Updated legend title
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+}
+
+# Assuming behaviour_wellbeing_analysis, males_data, and females_data have been updated to use anxiety_level_bi
+all_anxiety_plot_bi <- create_anxiety_gender_plot(behaviour_wellbeing_analysis, "All", "Purples")
+male_anxiety_plot_bi <- create_anxiety_gender_plot(males_data, "Male", "Blues")
+female_anxiety_plot_bi <- create_anxiety_gender_plot(females_data, "Female", "Reds")
+
+# Print the plots
+print(male_anxiety_plot_bi)
+print(female_anxiety_plot_bi)
+print(all_anxiety_plot_bi)
+
+
+```
+
+```{r}
+
+# Mann-Whitney U Test for mean_TikTok_duration by anxiety_level_bi (All participants)
+wilcox_mean_TikTok_all_anxiety_bi <- wilcox.test(mean_TikTok_duration ~ anxiety_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for mean_TikTok_duration by anxiety_level_bi (Male participants)
+wilcox_mean_TikTok_male_anxiety_bi <- wilcox.test(mean_TikTok_duration ~ anxiety_level_bi, data = males_data)
+
+# Mann-Whitney U Test for mean_TikTok_duration by anxiety_level_bi (Female participants)
+wilcox_mean_TikTok_female_anxiety_bi <- wilcox.test(mean_TikTok_duration ~ anxiety_level_bi, data = females_data)
+
+# Mann-Whitney U Test for TikTok_Duration_Percentage by anxiety_level_bi (All participants)
+wilcox_TikTok_Percentage_all_anxiety_bi <- wilcox.test(TikTok_Duration_Percentage ~ anxiety_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for TikTok_Duration_Percentage by anxiety_level_bi (Male participants)
+wilcox_TikTok_Percentage_male_anxiety_bi <- wilcox.test(TikTok_Duration_Percentage ~ anxiety_level_bi, data = males_data)
+
+# Mann-Whitney U Test for TikTok_Duration_Percentage by anxiety_level_bi (Female participants)
+wilcox_TikTok_Percentage_female_anxiety_bi <- wilcox.test(TikTok_Duration_Percentage ~ anxiety_level_bi, data = females_data)
+
+# Store the p-values in a list for Anxiety Level Bi Analysis
+TikTok_wilcox_summaries_anxiety_bi <- list(
+  mean_TikTok_duration_all_anxiety_bi = wilcox_mean_TikTok_all_anxiety_bi$p.value,
+  mean_TikTok_duration_males_anxiety_bi = wilcox_mean_TikTok_male_anxiety_bi$p.value,
+  mean_TikTok_duration_females_anxiety_bi = wilcox_mean_TikTok_female_anxiety_bi$p.value,
+  TikTok_Duration_Percentage_all_anxiety_bi = wilcox_TikTok_Percentage_all_anxiety_bi$p.value,
+  TikTok_Duration_Percentage_males_anxiety_bi = wilcox_TikTok_Percentage_male_anxiety_bi$p.value,
+  TikTok_Duration_Percentage_females_anxiety_bi = wilcox_TikTok_Percentage_female_anxiety_bi$p.value
+)
+
+# Print the p-values for each Mann-Whitney U test related to Anxiety Level Bi
+cat("P-values for Mann-Whitney U Tests with Anxiety Level Bi:\n")
+for (name in names(TikTok_wilcox_summaries_anxiety_bi)) {
+  cat(name, ":", TikTok_wilcox_summaries_anxiety_bi[[name]], "\n")
+}
+```
+
+```{r}
+# Plot for all participants - Mean TikTok Duration by Anxiety Level Bi
+TikTok_plot_all_mean_anxiety_bi <- ggplot(behaviour_wellbeing_analysis, aes(x = anxiety_level_bi, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Mean TikTok Duration by Anxiety Level Bi",
+       x = "Anxiety Level Bi",
+       y = "Mean TikTok Duration") +
+  theme_minimal()
+
+# Plot for male participants - Mean TikTok Duration by Anxiety Level Bi
+TikTok_plot_males_mean_anxiety_bi <- ggplot(males_data, aes(x = anxiety_level_bi, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Mean TikTok Duration by Anxiety Level Bi",
+       x = "Anxiety Level Bi",
+       y = "Mean TikTok Duration") +
+  theme_minimal()
+
+# Plot for female participants - Mean TikTok Duration by Anxiety Level Bi
+TikTok_plot_females_mean_anxiety_bi <- ggplot(females_data, aes(x = anxiety_level_bi, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Mean TikTok Duration by Anxiety Level Bi",
+       x = "Anxiety Level Bi",
+       y = "Mean TikTok Duration") +
+  theme_minimal()
+
+# Plot for all participants - TikTok Duration Percentage by Anxiety Level Bi
+TikTok_plot_all_percentage_anxiety_bi <- ggplot(behaviour_wellbeing_analysis, aes(x = anxiety_level_bi, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - TikTok Duration Percentage by Anxiety Level Bi",
+       x = "Anxiety Level Bi",
+       y = "TikTok Duration Percentage") +
+  theme_minimal()
+
+# Plot for male participants - TikTok Duration Percentage by Anxiety Level Bi
+TikTok_plot_males_percentage_anxiety_bi <- ggplot(males_data, aes(x = anxiety_level_bi, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - TikTok Duration Percentage by Anxiety Level Bi",
+       x = "Anxiety Level Bi",
+       y = "TikTok Duration Percentage") +
+  theme_minimal()
+
+# Plot for female participants - TikTok Duration Percentage by Anxiety Level Bi
+TikTok_plot_females_percentage_anxiety_bi <- ggplot(females_data, aes(x = anxiety_level_bi, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - TikTok Duration Percentage by Anxiety Level Bi",
+       x = "Anxiety Level Bi",
+       y = "TikTok Duration Percentage") +
+  theme_minimal()
+
+# Combine and display the plots
+plots_combined_anxiety_bi <- arrangeGrob(
+  TikTok_plot_all_mean_anxiety_bi, TikTok_plot_males_mean_anxiety_bi, TikTok_plot_females_mean_anxiety_bi,
+  TikTok_plot_all_percentage_anxiety_bi, TikTok_plot_males_percentage_anxiety_bi, TikTok_plot_females_percentage_anxiety_bi,
+  nrow = 2
+)
+
+ggsave("combined_plots_TikTok_Anxiety_Bi.png", plots_combined_anxiety_bi, width = 20, height = 12, units = "in")
+
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+4, TikTok ~ Ethnic.group across genders
+I am also interested in knowing whether mean_TikTok_duration is different across different ethnic groups
+```{r}
+
+create_ethnicity_gender_plot <- function(data, gender_name, palette_color) {
+  ggplot(data, aes(x = Ethnic.group, fill = Ethnic.group)) +
+    geom_bar() +
+    geom_text(stat = 'count', aes(label = ..count..), vjust = -0.3, color = "black") +
+    labs(title = paste("Ethnic Group Distribution Among", gender_name, "Participants"),
+         x = "Ethnic Group", y = "Count") +
+    scale_fill_brewer(palette = palette_color, name = "Ethnic Group") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+}
+
+all_ethnicity_plot <- create_ethnicity_gender_plot(behaviour_wellbeing_analysis, "All", "Purples")
+male_ethnicity_plot <- create_ethnicity_gender_plot(males_data, "Male", "Blues")
+female_ethnicity_plot <- create_ethnicity_gender_plot(females_data, "Female", "Reds")
+
+# Print the plots
+print(male_ethnicity_plot)
+print(female_ethnicity_plot)
+print(all_ethnicity_plot)
+
+
+```
+
+
+```{r}
+# Kruskal-Wallis Test for mean_TikTok_duration by Ethnic.group (All participants)
+kruskal_mean_TikTok_all_ethnic <- kruskal.test(mean_TikTok_duration ~ Ethnic.group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for mean_TikTok_duration by Ethnic.group (Male participants)
+kruskal_mean_TikTok_male_ethnic <- kruskal.test(mean_TikTok_duration ~ Ethnic.group, data = males_data)
+
+# Kruskal-Wallis Test for mean_TikTok_duration by Ethnic.group (Female participants)
+kruskal_mean_TikTok_female_ethnic <- kruskal.test(mean_TikTok_duration ~ Ethnic.group, data = females_data)
+
+# Kruskal-Wallis Test for TikTok_Duration_Percentage by Ethnic.group (All participants)
+kruskal_TikTok_Percentage_all_ethnic <- kruskal.test(TikTok_Duration_Percentage ~ Ethnic.group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for TikTok_Duration_Percentage by Ethnic.group (Male participants)
+kruskal_TikTok_Percentage_male_ethnic <- kruskal.test(TikTok_Duration_Percentage ~ Ethnic.group, data = males_data)
+
+# Kruskal-Wallis Test for TikTok_Duration_Percentage by Ethnic.group (Female participants)
+kruskal_TikTok_Percentage_female_ethnic <- kruskal.test(TikTok_Duration_Percentage ~ Ethnic.group, data = females_data)
+
+# Store the p-values in a list for Ethnic Group Analysis
+TikTok_kruskal_summaries_ethnic <- list(
+  mean_TikTok_duration_all_ethnic = kruskal_mean_TikTok_all_ethnic$p.value,
+  mean_TikTok_duration_males_ethnic = kruskal_mean_TikTok_male_ethnic$p.value,
+  mean_TikTok_duration_females_ethnic = kruskal_mean_TikTok_female_ethnic$p.value,
+  TikTok_Duration_Percentage_all_ethnic = kruskal_TikTok_Percentage_all_ethnic$p.value,
+  TikTok_Duration_Percentage_males_ethnic = kruskal_TikTok_Percentage_male_ethnic$p.value,
+  TikTok_Duration_Percentage_females_ethnic = kruskal_TikTok_Percentage_female_ethnic$p.value
+)
+
+# Print the p-values for each Kruskal-Wallis analysis related to Ethnic Group
+cat("P-values for Kruskal-Wallis Tests with Ethnic Group:\n")
+for (name in names(TikTok_kruskal_summaries_ethnic)) {
+  cat(name, ":", TikTok_kruskal_summaries_ethnic[[name]], "\n")
+}
+
+
+```
+
+
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+# Plot for all participants - Mean TikTok Duration by Ethnic Group
+TikTok_plot_all_mean_ethnic <- ggplot(behaviour_wellbeing_analysis, aes(x = Ethnic.group, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Mean TikTok Duration by Ethnic Group",
+       x = "Ethnic Group",
+       y = "Mean TikTok Duration") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for male participants - Mean TikTok Duration by Ethnic Group
+TikTok_plot_males_mean_ethnic <- ggplot(males_data, aes(x = Ethnic.group, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Mean TikTok Duration by Ethnic Group",
+       x = "Ethnic Group",
+       y = "Mean TikTok Duration") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for female participants - Mean TikTok Duration by Ethnic Group
+TikTok_plot_females_mean_ethnic <- ggplot(females_data, aes(x = Ethnic.group, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Mean TikTok Duration by Ethnic Group",
+       x = "Ethnic Group",
+       y = "Mean TikTok Duration") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for all participants - TikTok Duration Percentage by Ethnic Group
+TikTok_plot_all_percentage_ethnic <- ggplot(behaviour_wellbeing_analysis, aes(x = Ethnic.group, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - TikTok Duration Percentage by Ethnic Group",
+       x = "Ethnic Group",
+       y = "TikTok Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for male participants - TikTok Duration Percentage by Ethnic Group
+TikTok_plot_males_percentage_ethnic <- ggplot(males_data, aes(x = Ethnic.group, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - TikTok Duration Percentage by Ethnic Group",
+       x = "Ethnic Group",
+       y = "TikTok Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for female participants - TikTok Duration Percentage by Ethnic Group
+TikTok_plot_females_percentage_ethnic <- ggplot(females_data, aes(x = Ethnic.group, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - TikTok Duration Percentage by Ethnic Group",
+       x = "Ethnic Group",
+       y = "TikTok Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Combine and display the plots
+
+combined_plots <- arrangeGrob(
+  TikTok_plot_all_mean_ethnic, TikTok_plot_males_mean_ethnic, TikTok_plot_females_mean_ethnic,
+  TikTok_plot_all_percentage_ethnic, TikTok_plot_males_percentage_ethnic, TikTok_plot_females_percentage_ethnic,
+  nrow = 2
+)
+
+ggsave("combined_tiktok_plots.png", combined_plots, width = 16, height = 12, unit = "in")
+
+```
+
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+5, TikTok ~ Decile_group across genders
+```{r}
+create_decile_gender_plot <- function(data, gender_name, palette_color) {
+  ggplot(data, aes(x = Decile_group, fill = Decile_group)) +
+    geom_bar() +
+    geom_text(stat = 'count', aes(label = ..count..), vjust = -0.3, color = "black") +
+    labs(title = paste("Decile Group Distribution Among", gender_name, "Participants"),
+         x = "Decile Group", y = "Count") +
+    scale_fill_brewer(palette = palette_color, name = "Decile Group") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+all_decile_plot <- create_decile_gender_plot(behaviour_wellbeing_analysis, "All", "Purples")
+male_decile_plot <- create_decile_gender_plot(males_data, "Male", "Blues")
+female_decile_plot <- create_decile_gender_plot(females_data, "Female", "Reds")
+
+# Print the plots
+print(male_decile_plot)
+print(female_decile_plot)
+print(all_decile_plot)
+
+
+```
+
+
+```{r}
+# Kruskal-Wallis Test for mean_TikTok_duration by Decile_group (All participants)
+kruskal_mean_TikTok_all_decile_group <- kruskal.test(mean_TikTok_duration ~ Decile_group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for mean_TikTok_duration by Decile_group (Male participants)
+kruskal_mean_TikTok_male_decile_group <- kruskal.test(mean_TikTok_duration ~ Decile_group, data = males_data)
+
+# Kruskal-Wallis Test for mean_TikTok_duration by Decile_group (Female participants)
+kruskal_mean_TikTok_female_decile_group <- kruskal.test(mean_TikTok_duration ~ Decile_group, data = females_data)
+
+# Kruskal-Wallis Test for TikTok_Duration_Percentage by Decile_group (All participants)
+kruskal_TikTok_Percentage_all_decile_group <- kruskal.test(TikTok_Duration_Percentage ~ Decile_group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for TikTok_Duration_Percentage by Decile_group (Male participants)
+kruskal_TikTok_Percentage_male_decile_group <- kruskal.test(TikTok_Duration_Percentage ~ Decile_group, data = males_data)
+
+# Kruskal-Wallis Test for TikTok_Duration_Percentage by Decile_group (Female participants)
+kruskal_TikTok_Percentage_female_decile_group <- kruskal.test(TikTok_Duration_Percentage ~ Decile_group, data = females_data)
+
+# Store the p-values in a list for Decile Group Analysis
+TikTok_kruskal_summaries_decile_group <- list(
+  mean_TikTok_duration_all_decile_group = kruskal_mean_TikTok_all_decile_group$p.value,
+  mean_TikTok_duration_males_decile_group = kruskal_mean_TikTok_male_decile_group$p.value,
+  mean_TikTok_duration_females_decile_group = kruskal_mean_TikTok_female_decile_group$p.value,
+  TikTok_Duration_Percentage_all_decile_group = kruskal_TikTok_Percentage_all_decile_group$p.value,
+  TikTok_Duration_Percentage_males_decile_group = kruskal_TikTok_Percentage_male_decile_group$p.value,
+  TikTok_Duration_Percentage_females_decile_group = kruskal_TikTok_Percentage_female_decile_group$p.value
+)
+
+# Print the p-values for each Kruskal-Wallis analysis related to Decile Group
+cat("P-values for Kruskal-Wallis Tests with Decile Group:\n")
+for (name in names(TikTok_kruskal_summaries_decile_group)) {
+  cat(name, ":", TikTok_kruskal_summaries_decile_group[[name]], "\n")
+}
+
+```
+---------------------------------------------------------------------------------------------------------------------
+
+6.	TikTok usage ~ Gender
+```{r}
+# Kruskal-Wallis Test for mean_TikTok_duration by Gender
+kruskal_mean_TikTok_duration <- kruskal.test(mean_TikTok_duration ~ Gender, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for TikTok_Duration_Percentage by Gender
+kruskal_TikTok_duration_percentage <- kruskal.test(TikTok_Duration_Percentage ~ Gender, data = behaviour_wellbeing_analysis)
+
+# Print p-values for all Kruskal-Wallis tests
+cat("P-value for mean_TikTok_duration ~ Gender:", kruskal_mean_TikTok_duration$p.value, "\n")
+cat("P-value for TikTok_Duration_Percentage ~ Gender:", kruskal_TikTok_duration_percentage$p.value, "\n")
+
+
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+
+7, Gaming ~ ethnic group across genders
+```{r}
+# Kruskal-Wallis Test for mean_Gaming_duration by Ethnic.group (All participants)
+kruskal_mean_Gaming_all_ethnic_group <- kruskal.test(mean_Gaming_duration ~ Ethnic.group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for mean_Gaming_duration by Ethnic.group (Male participants)
+kruskal_mean_Gaming_male_ethnic_group <- kruskal.test(mean_Gaming_duration ~ Ethnic.group, data = males_data)
+
+# Kruskal-Wallis Test for mean_Gaming_duration by Ethnic.group (Female participants)
+kruskal_mean_Gaming_female_ethnic_group <- kruskal.test(mean_Gaming_duration ~ Ethnic.group, data = females_data)
+
+# Kruskal-Wallis Test for Gaming_Duration_Percentage by Ethnic.group (All participants)
+kruskal_Gaming_Percentage_all_ethnic_group <- kruskal.test(Gaming_Duration_Percentage ~ Ethnic.group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for Gaming_Duration_Percentage by Ethnic.group (Male participants)
+kruskal_Gaming_Percentage_male_ethnic_group <- kruskal.test(Gaming_Duration_Percentage ~ Ethnic.group, data = males_data)
+
+# Kruskal-Wallis Test for Gaming_Duration_Percentage by Ethnic.group (Female participants)
+kruskal_Gaming_Percentage_female_ethnic_group <- kruskal.test(Gaming_Duration_Percentage ~ Ethnic.group, data = females_data)
+
+# Store the p-values in a list for Ethnic Group Analysis
+Gaming_kruskal_summaries_ethnic_group <- list(
+  mean_Gaming_duration_all_ethnic_group = kruskal_mean_Gaming_all_ethnic_group$p.value,
+  mean_Gaming_duration_males_ethnic_group = kruskal_mean_Gaming_male_ethnic_group$p.value,
+  mean_Gaming_duration_females_ethnic_group = kruskal_mean_Gaming_female_ethnic_group$p.value,
+  Gaming_Duration_Percentage_all_ethnic_group = kruskal_Gaming_Percentage_all_ethnic_group$p.value,
+  Gaming_Duration_Percentage_males_ethnic_group = kruskal_Gaming_Percentage_male_ethnic_group$p.value,
+  Gaming_Duration_Percentage_females_ethnic_group = kruskal_Gaming_Percentage_female_ethnic_group$p.value
+)
+
+# Print the p-values for each Kruskal-Wallis analysis related to Ethnic Group and Gaming
+cat("P-values for Kruskal-Wallis Tests with Ethnic Group and Gaming:\n")
+for (name in names(Gaming_kruskal_summaries_ethnic_group)) {
+  cat(name, ":", Gaming_kruskal_summaries_ethnic_group[[name]], "\n")
+}
+
+```
+
+```{r}
+
+library(ggplot2)
+library(gridExtra)
+
+# Plot for all participants - Mean Gaming Duration by Ethnic Group
+Gaming_plot_all_mean_ethnic <- ggplot(behaviour_wellbeing_analysis, aes(x = Ethnic.group, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Mean Gaming Duration by Ethnic Group",
+       x = "Ethnic Group",
+       y = "Mean Gaming Duration") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for male participants - Mean Gaming Duration by Ethnic Group
+Gaming_plot_males_mean_ethnic <- ggplot(males_data, aes(x = Ethnic.group, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Mean Gaming Duration by Ethnic Group",
+       x = "Ethnic Group",
+       y = "Mean Gaming Duration") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for female participants - Mean Gaming Duration by Ethnic Group
+Gaming_plot_females_mean_ethnic <- ggplot(females_data, aes(x = Ethnic.group, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Mean Gaming Duration by Ethnic Group",
+       x = "Ethnic Group",
+       y = "Mean Gaming Duration") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for all participants - Gaming Duration Percentage by Ethnic Group
+Gaming_plot_all_percentage_ethnic <- ggplot(behaviour_wellbeing_analysis, aes(x = Ethnic.group, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Gaming Duration Percentage by Ethnic Group",
+       x = "Ethnic Group",
+       y = "Gaming Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for male participants - Gaming Duration Percentage by Ethnic Group
+Gaming_plot_males_percentage_ethnic <- ggplot(males_data, aes(x = Ethnic.group, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Gaming Duration Percentage by Ethnic Group",
+       x = "Ethnic Group",
+       y = "Gaming Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for female participants - Gaming Duration Percentage by Ethnic Group
+Gaming_plot_females_percentage_ethnic <- ggplot(females_data, aes(x = Ethnic.group, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Gaming Duration Percentage by Ethnic Group",
+       x = "Ethnic Group",
+       y = "Gaming Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Combine and display the plots
+combined_gaming_plots <- arrangeGrob(
+  Gaming_plot_all_mean_ethnic, 
+  Gaming_plot_males_mean_ethnic, 
+  Gaming_plot_females_mean_ethnic, 
+  Gaming_plot_all_percentage_ethnic, 
+  Gaming_plot_males_percentage_ethnic, 
+  Gaming_plot_females_percentage_ethnic,
+  nrow = 2
+)
+
+ggsave("combined_gaming_plots.png", combined_gaming_plots, width = 16, height = 12, unit = "in")
+```
+
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+
+8, Gaming ~ Decile_group across genders
+
+```{r}
+# Kruskal-Wallis Test for mean_Gaming_duration by Decile_group (All participants)
+kruskal_mean_Gaming_all_decile_group <- kruskal.test(mean_Gaming_duration ~ Decile_group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for mean_Gaming_duration by Decile_group (Male participants)
+kruskal_mean_Gaming_male_decile_group <- kruskal.test(mean_Gaming_duration ~ Decile_group, data = males_data)
+
+# Kruskal-Wallis Test for mean_Gaming_duration by Decile_group (Female participants)
+kruskal_mean_Gaming_female_decile_group <- kruskal.test(mean_Gaming_duration ~ Decile_group, data = females_data)
+
+# Kruskal-Wallis Test for Gaming_Duration_Percentage by Decile_group (All participants)
+kruskal_Gaming_Percentage_all_decile_group <- kruskal.test(Gaming_Duration_Percentage ~ Decile_group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for Gaming_Duration_Percentage by Decile_group (Male participants)
+kruskal_Gaming_Percentage_male_decile_group <- kruskal.test(Gaming_Duration_Percentage ~ Decile_group, data = males_data)
+
+# Kruskal-Wallis Test for Gaming_Duration_Percentage by Decile_group (Female participants)
+kruskal_Gaming_Percentage_female_decile_group <- kruskal.test(Gaming_Duration_Percentage ~ Decile_group, data = females_data)
+
+# Store the p-values in a list for Decile Group Analysis
+Gaming_kruskal_summaries_decile_group <- list(
+  mean_Gaming_duration_all_decile_group = kruskal_mean_Gaming_all_decile_group$p.value,
+  mean_Gaming_duration_males_decile_group = kruskal_mean_Gaming_male_decile_group$p.value,
+  mean_Gaming_duration_females_decile_group = kruskal_mean_Gaming_female_decile_group$p.value,
+  Gaming_Duration_Percentage_all_decile_group = kruskal_Gaming_Percentage_all_decile_group$p.value,
+  Gaming_Duration_Percentage_males_decile_group = kruskal_Gaming_Percentage_male_decile_group$p.value,
+  Gaming_Duration_Percentage_females_decile_group = kruskal_Gaming_Percentage_female_decile_group$p.value
+)
+
+# Print the p-values for each Kruskal-Wallis analysis related to Decile Group and Gaming
+cat("P-values for Kruskal-Wallis Tests with Decile Group and Gaming:\n")
+for (name in names(Gaming_kruskal_summaries_decile_group)) {
+  cat(name, ":", Gaming_kruskal_summaries_decile_group[[name]], "\n")
+}
+```
+
+
+```{r}
+# Plot for all participants - Mean Gaming Duration by Decile Group
+Gaming_plot_all_mean_decile <- ggplot(behaviour_wellbeing_analysis, aes(x = Decile_group, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Mean Gaming Duration by Decile Group",
+       x = "Decile Group",
+       y = "Mean Gaming Duration") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for male participants - Mean Gaming Duration by Decile Group
+Gaming_plot_males_mean_decile <- ggplot(males_data, aes(x = Decile_group, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Mean Gaming Duration by Decile Group",
+       x = "Decile Group",
+       y = "Mean Gaming Duration") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for female participants - Mean Gaming Duration by Decile Group
+Gaming_plot_females_mean_decile <- ggplot(females_data, aes(x = Decile_group, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Mean Gaming Duration by Decile Group",
+       x = "Decile Group",
+       y = "Mean Gaming Duration") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for all participants - Gaming Duration Percentage by Decile Group
+Gaming_plot_all_percentage_decile <- ggplot(behaviour_wellbeing_analysis, aes(x = Decile_group, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Gaming Duration Percentage by Decile Group",
+       x = "Decile Group",
+       y = "Gaming Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for male participants - Gaming Duration Percentage by Decile Group
+Gaming_plot_males_percentage_decile <- ggplot(males_data, aes(x = Decile_group, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Gaming Duration Percentage by Decile Group",
+       x = "Decile Group",
+       y = "Gaming Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot for female participants - Gaming Duration Percentage by Decile Group
+Gaming_plot_females_percentage_decile <- ggplot(females_data, aes(x = Decile_group, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Gaming Duration Percentage by Decile Group",
+       x = "Decile Group",
+       y = "Gaming Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Combine and display the plots
+combined_gaming_decile_plots <- arrangeGrob(
+  Gaming_plot_all_mean_decile, 
+  Gaming_plot_males_mean_decile, 
+  Gaming_plot_females_mean_decile, 
+  Gaming_plot_all_percentage_decile, 
+  Gaming_plot_males_percentage_decile, 
+  Gaming_plot_females_percentage_decile,
+  nrow = 2
+)
+
+ggsave("combined_gaming_decile_plots.png", combined_gaming_decile_plots, width = 16, height = 12, unit = "in")
+
+```
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+9, Gaming ~ Gender
+now, we test the game data against gender. I guess the result will not be too mind-blowing.Even though non-Pvalues suggests statistical significance, we can still observe that 
+
+```{r}
+# Kruskal-Wallis Test for mean_Gaming_duration by Gender
+kruskal_mean_gaming_duration <- kruskal.test(mean_Gaming_duration ~ Gender, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for Gaming_Duration_Percentage by Gender
+kruskal_gaming_duration_percentage <- kruskal.test(Gaming_Duration_Percentage ~ Gender, data = behaviour_wellbeing_analysis)
+
+# Print p-values for all Kruskal-Wallis tests
+cat("P-value for mean_Gaming_duration ~ Gender:", kruskal_mean_gaming_duration$p.value, "\n")
+cat("P-value for Gaming_Duration_Percentage ~ Gender:", kruskal_gaming_duration_percentage$p.value, "\n")
+
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+10.	Gaming ~ undersleep across genders
+```{r}
+# Mann-Whitney-Wilcoxon Test for mean_Gaming_duration by Underslept (All participants)
+wilcox_mean_Gaming_all <- wilcox.test(mean_Gaming_duration ~ Underslept, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney-Wilcoxon Test for mean_Gaming_duration by Underslept (Male participants)
+wilcox_mean_Gaming_male <- wilcox.test(mean_Gaming_duration ~ Underslept, data = males_data)
+
+# Mann-Whitney-Wilcoxon Test for mean_Gaming_duration by Underslept (Female participants)
+wilcox_mean_Gaming_female <- wilcox.test(mean_Gaming_duration ~ Underslept, data = females_data)
+
+# Mann-Whitney-Wilcoxon Test for Gaming_Duration_Percentage by Underslept (All participants)
+wilcox_Gaming_Percentage_all <- wilcox.test(Gaming_Duration_Percentage ~ Underslept, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney-Wilcoxon Test for Gaming_Duration_Percentage by Underslept (Male participants)
+wilcox_Gaming_Percentage_male <- wilcox.test(Gaming_Duration_Percentage ~ Underslept, data = males_data)
+
+# Mann-Whitney-Wilcoxon Test for Gaming_Duration_Percentage by Underslept (Female participants)
+wilcox_Gaming_Percentage_female <- wilcox.test(Gaming_Duration_Percentage ~ Underslept, data = females_data)
+
+# Store the p-values in a list for Mann-Whitney-Wilcoxon Analyses
+Gaming_wilcox_summaries <- list(
+  mean_Gaming_duration_all = wilcox_mean_Gaming_all$p.value,
+  mean_Gaming_duration_males = wilcox_mean_Gaming_male$p.value,
+  mean_Gaming_duration_females = wilcox_mean_Gaming_female$p.value,
+  Gaming_Duration_Percentage_all = wilcox_Gaming_Percentage_all$p.value,
+  Gaming_Duration_Percentage_males = wilcox_Gaming_Percentage_male$p.value,
+  Gaming_Duration_Percentage_females = wilcox_Gaming_Percentage_female$p.value
+)
+
+# Print the p-values for Gaming Mann-Whitney-Wilcoxon Analyses
+cat("P-values for Gaming Mann-Whitney-Wilcoxon Analyses:\n")
+for (name in names(Gaming_wilcox_summaries)) {
+  cat(name, ":", Gaming_wilcox_summaries[[name]], "\n")
+}
+
+```
+
+
+```{r}
+library(ggplot2)
+library(patchwork)
+
+# Plot for all participants - Mean Gaming Duration
+Gaming_plot_all <- ggplot(behaviour_wellbeing_analysis, aes(x = Underslept, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Mean Gaming Duration",
+       x = "Underslept",
+       y = "Mean Gaming Duration") +
+  theme_minimal()
+
+# Plot for male participants - Mean Gaming Duration
+Gaming_plot_males_mean <- ggplot(males_data, aes(x = Underslept, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Mean Gaming Duration",
+       x = "Underslept",
+       y = "Mean Gaming Duration") +
+  theme_minimal()
+
+# Plot for female participants - Mean Gaming Duration
+Gaming_plot_females_mean <- ggplot(females_data, aes(x = Underslept, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Mean Gaming Duration",
+       x = "Underslept",
+       y = "Mean Gaming Duration") +
+  theme_minimal()
+
+# Plot for all participants - Gaming Duration Percentage
+Gaming_plot_all_percentage <- ggplot(behaviour_wellbeing_analysis, aes(x = Underslept, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "All Participants - Gaming Duration Percentage",
+       x = "Underslept",
+       y = "Gaming Duration Percentage") +
+  theme_minimal()
+
+# Plot for male participants - Gaming Duration Percentage
+Gaming_plot_males_percentage <- ggplot(males_data, aes(x = Underslept, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Males - Gaming Duration Percentage",
+       x = "Underslept",
+       y = "Gaming Duration Percentage") +
+  theme_minimal()
+
+# Plot for female participants - Gaming Duration Percentage
+Gaming_plot_females_percentage <- ggplot(females_data, aes(x = Underslept, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Females - Gaming Duration Percentage",
+       x = "Underslept",
+       y = "Gaming Duration Percentage") +
+  theme_minimal()
+
+combined_gaming_undersleep_plots <- arrangeGrob(
+  Gaming_plot_all, 
+  Gaming_plot_males_mean, 
+  Gaming_plot_females_mean, 
+  Gaming_plot_all_percentage, 
+  Gaming_plot_males_percentage, 
+  Gaming_plot_females_percentage,
+  nrow = 2
+)
+
+
+ggsave("combined_gaming_undersleep_plots.png", combined_gaming_undersleep_plots, width = 16, height = 12, unit = "in")
+
+
+```
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+
+11.	Gaming ~ depression_level_bi (PHQ9 test) across genders
+```{r}
+# Mann-Whitney U Test for mean_Gaming_duration by depression_level_bi (All participants)
+wilcox_mean_Gaming_all_depression_bi <- wilcox.test(mean_Gaming_duration ~ depression_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for mean_Gaming_duration by depression_level_bi (Male participants)
+wilcox_mean_Gaming_male_depression_bi <- wilcox.test(mean_Gaming_duration ~ depression_level_bi, data = males_data)
+
+# Mann-Whitney U Test for mean_Gaming_duration by depression_level_bi (Female participants)
+wilcox_mean_Gaming_female_depression_bi <- wilcox.test(mean_Gaming_duration ~ depression_level_bi, data = females_data)
+
+# Mann-Whitney U Test for Gaming_Duration_Percentage by depression_level_bi (All participants)
+wilcox_Gaming_Percentage_all_depression_bi <- wilcox.test(Gaming_Duration_Percentage ~ depression_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for Gaming_Duration_Percentage by depression_level_bi (Male participants)
+wilcox_Gaming_Percentage_male_depression_bi <- wilcox.test(Gaming_Duration_Percentage ~ depression_level_bi, data = males_data)
+
+# Mann-Whitney U Test for Gaming_Duration_Percentage by depression_level_bi (Female participants)
+wilcox_Gaming_Percentage_female_depression_bi <- wilcox.test(Gaming_Duration_Percentage ~ depression_level_bi, data = females_data)
+
+# Store the p-values in a list for Mann-Whitney U Tests
+Gaming_wilcox_summaries_depression_gender_bi <- list(
+  mean_Gaming_duration_all_depression_bi = wilcox_mean_Gaming_all_depression_bi$p.value,
+  mean_Gaming_duration_males_depression_bi = wilcox_mean_Gaming_male_depression_bi$p.value,
+  mean_Gaming_duration_females_depression_bi = wilcox_mean_Gaming_female_depression_bi$p.value,
+  Gaming_Duration_Percentage_all_depression_bi = wilcox_Gaming_Percentage_all_depression_bi$p.value,
+  Gaming_Duration_Percentage_males_depression_bi = wilcox_Gaming_Percentage_male_depression_bi$p.value,
+  Gaming_Duration_Percentage_females_depression_bi = wilcox_Gaming_Percentage_female_depression_bi$p.value
+)
+
+# Print the p-values for each Mann-Whitney U test related to Gaming and Depression Level Bi across Gender and Overall
+cat("P-values for Gaming Mann-Whitney U Tests with Depression Level Bi across Gender and Overall:\n")
+for (name in names(Gaming_wilcox_summaries_depression_gender_bi)) {
+  cat(name, ":", Gaming_wilcox_summaries_depression_gender_bi[[name]], "\n")
+}
+
+
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+12.	Gaming ~ anxiety_level across genders 
+```{r}
+# Mann-Whitney U Test for mean_Gaming_duration by anxiety_level_bi (All participants)
+wilcox_mean_Gaming_all_anxiety_bi <- wilcox.test(mean_Gaming_duration ~ anxiety_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for mean_Gaming_duration by anxiety_level_bi (Male participants)
+wilcox_mean_Gaming_male_anxiety_bi <- wilcox.test(mean_Gaming_duration ~ anxiety_level_bi, data = males_data)
+
+# Mann-Whitney U Test for mean_Gaming_duration by anxiety_level_bi (Female participants)
+wilcox_mean_Gaming_female_anxiety_bi <- wilcox.test(mean_Gaming_duration ~ anxiety_level_bi, data = females_data)
+
+# Mann-Whitney U Test for Gaming_Duration_Percentage by anxiety_level_bi (All participants)
+wilcox_Gaming_Percentage_all_anxiety_bi <- wilcox.test(Gaming_Duration_Percentage ~ anxiety_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for Gaming_Duration_Percentage by anxiety_level_bi (Male participants)
+wilcox_Gaming_Percentage_male_anxiety_bi <- wilcox.test(Gaming_Duration_Percentage ~ anxiety_level_bi, data = males_data)
+
+# Mann-Whitney U Test for Gaming_Duration_Percentage by anxiety_level_bi (Female participants)
+wilcox_Gaming_Percentage_female_anxiety_bi <- wilcox.test(Gaming_Duration_Percentage ~ anxiety_level_bi, data = females_data)
+
+# Store the p-values in a list for Mann-Whitney U Tests
+Gaming_wilcox_summaries_anxiety_gender_bi <- list(
+  mean_Gaming_duration_all_anxiety_bi = wilcox_mean_Gaming_all_anxiety_bi$p.value,
+  mean_Gaming_duration_males_anxiety_bi = wilcox_mean_Gaming_male_anxiety_bi$p.value,
+  mean_Gaming_duration_females_anxiety_bi = wilcox_mean_Gaming_female_anxiety_bi$p.value,
+  Gaming_Duration_Percentage_all_anxiety_bi = wilcox_Gaming_Percentage_all_anxiety_bi$p.value,
+  Gaming_Duration_Percentage_males_anxiety_bi = wilcox_Gaming_Percentage_male_anxiety_bi$p.value,
+  Gaming_Duration_Percentage_females_anxiety_bi = wilcox_Gaming_Percentage_female_anxiety_bi$p.value
+)
+
+# Print the p-values for each Mann-Whitney U test related to Gaming and Anxiety Level Bi across Gender and Overall
+cat("P-values for Gaming Mann-Whitney U Tests with Anxiety Level Bi across Gender and Overall:\n")
+for (name in names(Gaming_wilcox_summaries_anxiety_gender_bi)) {
+  cat(name, ":", Gaming_wilcox_summaries_anxiety_gender_bi[[name]], "\n")
+}
+
+```
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+13.	Youtube ~ ethnic_group (and across gender)
+```{r}
+# Kruskal-Wallis Test for mean_YouTube_duration by Ethnic.group (All participants)
+kruskal_mean_YouTube_all_ethnic_group <- kruskal.test(mean_YouTube_duration ~ Ethnic.group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for mean_YouTube_duration by Ethnic.group (Male participants)
+kruskal_mean_YouTube_male_ethnic_group <- kruskal.test(mean_YouTube_duration ~ Ethnic.group, data = males_data)
+
+# Kruskal-Wallis Test for mean_YouTube_duration by Ethnic.group (Female participants)
+kruskal_mean_YouTube_female_ethnic_group <- kruskal.test(mean_YouTube_duration ~ Ethnic.group, data = females_data)
+
+# Kruskal-Wallis Test for YouTube_Duration_Percentage by Ethnic.group (All participants)
+kruskal_YouTube_Percentage_all_ethnic_group <- kruskal.test(YouTube_Duration_Percentage ~ Ethnic.group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for YouTube_Duration_Percentage by Ethnic.group (Male participants)
+kruskal_YouTube_Percentage_male_ethnic_group <- kruskal.test(YouTube_Duration_Percentage ~ Ethnic.group, data = males_data)
+
+# Kruskal-Wallis Test for YouTube_Duration_Percentage by Ethnic.group (Female participants)
+kruskal_YouTube_Percentage_female_ethnic_group <- kruskal.test(YouTube_Duration_Percentage ~ Ethnic.group, data = females_data)
+
+# Store the p-values in a list for Ethnic Group Analysis
+YouTube_kruskal_summaries_ethnic_group <- list(
+  mean_YouTube_duration_all_ethnic_group = kruskal_mean_YouTube_all_ethnic_group$p.value,
+  mean_YouTube_duration_males_ethnic_group = kruskal_mean_YouTube_male_ethnic_group$p.value,
+  mean_YouTube_duration_females_ethnic_group = kruskal_mean_YouTube_female_ethnic_group$p.value,
+  YouTube_Duration_Percentage_all_ethnic_group = kruskal_YouTube_Percentage_all_ethnic_group$p.value,
+  YouTube_Duration_Percentage_males_ethnic_group = kruskal_YouTube_Percentage_male_ethnic_group$p.value,
+  YouTube_Duration_Percentage_females_ethnic_group = kruskal_YouTube_Percentage_female_ethnic_group$p.value
+)
+
+# Print the p-values for each Kruskal-Wallis analysis related to Ethnic Group and YouTube
+cat("P-values for Kruskal-Wallis Tests with Ethnic Group and YouTube:\n")
+for (name in names(YouTube_kruskal_summaries_ethnic_group)) {
+  cat(name, ":", YouTube_kruskal_summaries_ethnic_group[[name]], "\n")
+}
+
+
+```
+---------------------------------------------------------------------------------------------------------------------
+
+14.	Youtube ~ decile group (and across gender)
+
+```{r}
+# Kruskal-Wallis Test for mean_YouTube_duration by Decile_group (All participants)
+kruskal_mean_YouTube_all_decile_group <- kruskal.test(mean_YouTube_duration ~ Decile_group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for mean_YouTube_duration by Decile_group (Male participants)
+kruskal_mean_YouTube_male_decile_group <- kruskal.test(mean_YouTube_duration ~ Decile_group, data = males_data)
+
+# Kruskal-Wallis Test for mean_YouTube_duration by Decile_group (Female participants)
+kruskal_mean_YouTube_female_decile_group <- kruskal.test(mean_YouTube_duration ~ Decile_group, data = females_data)
+
+# Kruskal-Wallis Test for YouTube_Duration_Percentage by Decile_group (All participants)
+kruskal_YouTube_Percentage_all_decile_group <- kruskal.test(YouTube_Duration_Percentage ~ Decile_group, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for YouTube_Duration_Percentage by Decile_group (Male participants)
+kruskal_YouTube_Percentage_male_decile_group <- kruskal.test(YouTube_Duration_Percentage ~ Decile_group, data = males_data)
+
+# Kruskal-Wallis Test for YouTube_Duration_Percentage by Decile_group (Female participants)
+kruskal_YouTube_Percentage_female_decile_group <- kruskal.test(YouTube_Duration_Percentage ~ Decile_group, data = females_data)
+
+# Store the p-values in a list for Decile Group Analysis
+YouTube_kruskal_summaries_decile_group <- list(
+  mean_YouTube_duration_all_decile_group = kruskal_mean_YouTube_all_decile_group$p.value,
+  mean_YouTube_duration_males_decile_group = kruskal_mean_YouTube_male_decile_group$p.value,
+  mean_YouTube_duration_females_decile_group = kruskal_mean_YouTube_female_decile_group$p.value,
+  YouTube_Duration_Percentage_all_decile_group = kruskal_YouTube_Percentage_all_decile_group$p.value,
+  YouTube_Duration_Percentage_males_decile_group = kruskal_YouTube_Percentage_male_decile_group$p.value,
+  YouTube_Duration_Percentage_females_decile_group = kruskal_YouTube_Percentage_female_decile_group$p.value
+)
+
+# Print the p-values for each Kruskal-Wallis analysis related to Decile Group and YouTube
+cat("P-values for Kruskal-Wallis Tests with Decile Group and YouTube:\n")
+for (name in names(YouTube_kruskal_summaries_decile_group)) {
+  cat(name, ":", YouTube_kruskal_summaries_decile_group[[name]], "\n")
+}
+
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+
+15.	Youtube ~ Gender
+```{r}
+# Kruskal-Wallis Test for mean_YouTube_duration by Gender
+kruskal_mean_YouTube_duration <- kruskal.test(mean_YouTube_duration ~ Gender, data = behaviour_wellbeing_analysis)
+
+# Kruskal-Wallis Test for YouTube_Duration_Percentage by Gender
+kruskal_YouTube_duration_percentage <- kruskal.test(YouTube_Duration_Percentage ~ Gender, data = behaviour_wellbeing_analysis)
+
+# Print p-values for all Kruskal-Wallis tests
+cat("P-value for mean_YouTube_duration ~ Gender:", kruskal_mean_YouTube_duration$p.value, "\n")
+cat("P-value for YouTube_Duration_Percentage ~ Gender:", kruskal_YouTube_duration_percentage$p.value, "\n")
+
+
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+16.	Youtube ~ undersleep across genders
+
+```{r}
+# Mann-Whitney-Wilcoxon Test for mean_YouTube_duration by Underslept (All participants)
+wilcox_mean_YouTube_all <- wilcox.test(mean_YouTube_duration ~ Underslept, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney-Wilcoxon Test for mean_YouTube_duration by Underslept (Male participants)
+wilcox_mean_YouTube_male <- wilcox.test(mean_YouTube_duration ~ Underslept, data = males_data)
+
+# Mann-Whitney-Wilcoxon Test for mean_YouTube_duration by Underslept (Female participants)
+wilcox_mean_YouTube_female <- wilcox.test(mean_YouTube_duration ~ Underslept, data = females_data)
+
+# Mann-Whitney-Wilcoxon Test for YouTube_Duration_Percentage by Underslept (All participants)
+wilcox_YouTube_Percentage_all <- wilcox.test(YouTube_Duration_Percentage ~ Underslept, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney-Wilcoxon Test for YouTube_Duration_Percentage by Underslept (Male participants)
+wilcox_YouTube_Percentage_male <- wilcox.test(YouTube_Duration_Percentage ~ Underslept, data = males_data)
+
+# Mann-Whitney-Wilcoxon Test for YouTube_Duration_Percentage by Underslept (Female participants)
+wilcox_YouTube_Percentage_female <- wilcox.test(YouTube_Duration_Percentage ~ Underslept, data = females_data)
+
+# Store the p-values in a list for Mann-Whitney-Wilcoxon Analyses
+YouTube_wilcox_summaries <- list(
+  mean_YouTube_duration_all = wilcox_mean_YouTube_all$p.value,
+  mean_YouTube_duration_males = wilcox_mean_YouTube_male$p.value,
+  mean_YouTube_duration_females = wilcox_mean_YouTube_female$p.value,
+  YouTube_Duration_Percentage_all = wilcox_YouTube_Percentage_all$p.value,
+  YouTube_Duration_Percentage_males = wilcox_YouTube_Percentage_male$p.value,
+  YouTube_Duration_Percentage_females = wilcox_YouTube_Percentage_female$p.value
+)
+
+# Print the p-values for YouTube Mann-Whitney-Wilcoxon Analyses
+cat("P-values for YouTube Mann-Whitney-Wilcoxon Analyses:\n")
+for (name in names(YouTube_wilcox_summaries)) {
+  cat(name, ":", YouTube_wilcox_summaries[[name]], "\n")
+}
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+17.	Youtube ~ depression_level (PHQ9 test) across genders
+
+```{r}
+# Mann-Whitney U Test for mean_YouTube_duration by depression_level_bi (All participants)
+wilcox_mean_YouTube_all_depression_bi <- wilcox.test(mean_YouTube_duration ~ depression_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for mean_YouTube_duration by depression_level_bi (Male participants)
+wilcox_mean_YouTube_male_depression_bi <- wilcox.test(mean_YouTube_duration ~ depression_level_bi, data = males_data)
+
+# Mann-Whitney U Test for mean_YouTube_duration by depression_level_bi (Female participants)
+wilcox_mean_YouTube_female_depression_bi <- wilcox.test(mean_YouTube_duration ~ depression_level_bi, data = females_data)
+
+# Mann-Whitney U Test for YouTube_Duration_Percentage by depression_level_bi (All participants)
+wilcox_YouTube_Percentage_all_depression_bi <- wilcox.test(YouTube_Duration_Percentage ~ depression_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for YouTube_Duration_Percentage by depression_level_bi (Male participants)
+wilcox_YouTube_Percentage_male_depression_bi <- wilcox.test(YouTube_Duration_Percentage ~ depression_level_bi, data = males_data)
+
+# Mann-Whitney U Test for YouTube_Duration_Percentage by depression_level_bi (Female participants)
+wilcox_YouTube_Percentage_female_depression_bi <- wilcox.test(YouTube_Duration_Percentage ~ depression_level_bi, data = females_data)
+
+# Store the p-values in a list for Mann-Whitney U Tests
+YouTube_wilcox_summaries_depression_gender_bi <- list(
+  mean_YouTube_duration_all_depression_bi = wilcox_mean_YouTube_all_depression_bi$p.value,
+  mean_YouTube_duration_males_depression_bi = wilcox_mean_YouTube_male_depression_bi$p.value,
+  mean_YouTube_duration_females_depression_bi = wilcox_mean_YouTube_female_depression_bi$p.value,
+  YouTube_Duration_Percentage_all_depression_bi = wilcox_YouTube_Percentage_all_depression_bi$p.value,
+  YouTube_Duration_Percentage_males_depression_bi = wilcox_YouTube_Percentage_male_depression_bi$p.value,
+  YouTube_Duration_Percentage_females_depression_bi = wilcox_YouTube_Percentage_female_depression_bi$p.value
+)
+
+# Print the p-values for each Mann-Whitney U test related to YouTube and Depression Level Bi across Gender and Overall
+cat("P-values for YouTube Mann-Whitney U Tests with Depression Level Bi across Gender and Overall:\n")
+for (name in names(YouTube_wilcox_summaries_depression_gender_bi)) {
+  cat(name, ":", YouTube_wilcox_summaries_depression_gender_bi[[name]], "\n")
+}
+
+```
+---------------------------------------------------------------------------------------------------------------------
+
+18.	Youtube ~ anxiety_level across genders 
+```{r}
+
+# Mann-Whitney U Test for mean_YouTube_duration by anxiety_level_bi (All participants)
+wilcox_mean_YouTube_all_anxiety_bi <- wilcox.test(mean_YouTube_duration ~ anxiety_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for mean_YouTube_duration by anxiety_level_bi (Male participants)
+wilcox_mean_YouTube_male_anxiety_bi <- wilcox.test(mean_YouTube_duration ~ anxiety_level_bi, data = males_data)
+
+# Mann-Whitney U Test for mean_YouTube_duration by anxiety_level_bi (Female participants)
+wilcox_mean_YouTube_female_anxiety_bi <- wilcox.test(mean_YouTube_duration ~ anxiety_level_bi, data = females_data)
+
+# Mann-Whitney U Test for YouTube_Duration_Percentage by anxiety_level_bi (All participants)
+wilcox_YouTube_Percentage_all_anxiety_bi <- wilcox.test(YouTube_Duration_Percentage ~ anxiety_level_bi, data = behaviour_wellbeing_analysis)
+
+# Mann-Whitney U Test for YouTube_Duration_Percentage by anxiety_level_bi (Male participants)
+wilcox_YouTube_Percentage_male_anxiety_bi <- wilcox.test(YouTube_Duration_Percentage ~ anxiety_level_bi, data = males_data)
+
+# Mann-Whitney U Test for YouTube_Duration_Percentage by anxiety_level_bi (Female participants)
+wilcox_YouTube_Percentage_female_anxiety_bi <- wilcox.test(YouTube_Duration_Percentage ~ anxiety_level_bi, data = females_data)
+
+# Store the p-values in a list for Mann-Whitney U Tests
+YouTube_wilcox_summaries_anxiety_gender_bi <- list(
+  mean_YouTube_duration_all_anxiety_bi = wilcox_mean_YouTube_all_anxiety_bi$p.value,
+  mean_YouTube_duration_males_anxiety_bi = wilcox_mean_YouTube_male_anxiety_bi$p.value,
+  mean_YouTube_duration_females_anxiety_bi = wilcox_mean_YouTube_female_anxiety_bi$p.value,
+  YouTube_Duration_Percentage_all_anxiety_bi = wilcox_YouTube_Percentage_all_anxiety_bi$p.value,
+  YouTube_Duration_Percentage_males_anxiety_bi = wilcox_YouTube_Percentage_male_anxiety_bi$p.value,
+  YouTube_Duration_Percentage_females_anxiety_bi = wilcox_YouTube_Percentage_female_anxiety_bi$p.value
+)
+
+# Print the p-values for each Mann-Whitney U test related to YouTube and Anxiety Level Bi across Gender and Overall
+cat("P-values for YouTube Mann-Whitney U Tests with Anxiety Level Bi across Gender and Overall:\n")
+for (name in names(YouTube_wilcox_summaries_anxiety_gender_bi)) {
+  cat(name, ":", YouTube_wilcox_summaries_anxiety_gender_bi[[name]], "\n")
+}
+
+```
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+Now, I want to refer to Kodie's work and plot number of sessions agaisnt number of session duration 
+
+
+```{r}
+
+# Filter out the behaviors we don't need to summarize
+session_v_session_time <- observation_data %>% 
+  filter(!Behaviour %in% c("Blank/Disengaged", "Non-Educational", "Educational"))
+
+# Group the data by 'Behaviour' and calculate the number of sessions and sum of 'Behaviour_duration'
+session_summary <- session_v_session_time %>% 
+  group_by(Behaviour) %>% 
+  summarise(
+    number_of_sessions = n(),
+    sum_behaviour_duration = sum(Behaviour_duration)
+  ) %>% 
+  ungroup()
+
+# Plotting the number of sessions against the sum of behavior duration
+session_v_session_plot <- ggplot(session_summary, aes(x = sum_behaviour_duration, y = number_of_sessions, label = Behaviour)) +
+  geom_point() +
+  geom_text(vjust = "inward", hjust = "inward", check_overlap = TRUE, size = 3) +
+  labs(x = "Total Session Time",
+    y = "Number of Sessions") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"))
+
+# Display the plot
+print(session_v_session_plot)
+
+# Save the plot with specified theme settings
+ggsave(filename = "session_vs_session_time_plot.png", 
+       plot = session_v_session_plot,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+```
+
+
+When compared to Kodie's work, which is based on 2021 Kids Online data (17 observations), gaming has shifted its position from the southwest to the northeast side. This suggests that children now tend to have more gaming sessions and longer gaming duration than they did two years ago. 
+
+Kodie's spreadsheet suggests the mean gaming session time is 338 seconds, while my study, this increased to 517 seconds. This represent a 53% increase 
+
+To compare the mean_session_time of all behaviours with Kodies's work 
+
+```{r}
+
+# Read the dataset into an R dataframe
+Kodie_data <- read_excel("C:/Users/Jason/OneDrive/桌面/501/Kodies work/Avalon-Newlands-Scots-Master.xlsx")
+
+# Calculate the mean Session_Time for each unique Behavior
+summary2021 <- Kodie_data %>%
+  group_by(Behaviour) %>%
+  summarise(Mean_Session_Time = mean(Session_Time, na.rm = TRUE)) %>%
+  ungroup() 
+
+#Here, I rename some of Kodie's behavior names in order to join with the current data
+summary2021 <- summary2021 %>%
+  mutate(Behaviour = recode(Behaviour,
+                            'Educational (knowledge)' = 'Educational',
+                            'Youtube (incl other video streaming apps)' = 'Youtube',
+                            'Tiktok' = 'TikTok',
+                            'Spotify, or other music streaming app' = 'Spotify / music'))
+
+print(summary2021)
+
+```
+
+```{r}
+
+summary2023 <- observation_data%>%
+  group_by(Behaviour) %>%
+  summarise(Mean_Session_Time = mean(Behaviour_duration, na.rm = TRUE)) %>%
+  ungroup() 
+
+comparison_data <- merge(summary2021, summary2023, by = "Behaviour", all = TRUE)
+
+# Remove rows with NA values
+comparison_data <- na.omit(comparison_data)
+
+# Remove rows where Behavior is 'Live Communication'. This is because in 2021, MS Teams	was listed as a seperate behavour but in 2023 was included in Live Communication
+comparison_data <- comparison_data %>%
+  filter(Behaviour != "Live Communication")
+
+comparison_data <- comparison_data %>%
+  rename(`2021` = Mean_Session_Time.x, `2023` = Mean_Session_Time.y) %>%
+  mutate(Percentage_Change = ((`2023` - `2021`) / `2021`) * 100)
+
+comparison_data
+
+```
+
+To visualise mean session time for each behaviour in Kodie's study
+```{r}
+ggplot(summary2021, aes(x = Behaviour, y = Mean_Session_Time, fill = Behaviour)) + 
+  geom_bar(stat = "identity") +  
+  theme_minimal() +
+  labs(x = "Behaviour", y = "Mean Session Time", title = "Mean Session Time by Behaviour in 2021") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),  
+        legend.position = "none")  
+```
+
+To visualise mean session time for each behaviour in this study
+
+```{r}
+ggplot(summary2023, aes(x = Behaviour, y = Mean_Session_Time, fill = Behaviour)) + 
+  geom_bar(stat = "identity") +  
+  theme_minimal() +
+  labs(x = "Behaviour", y = "Mean Session Time", title = "Mean Session Time by Behaviour in 2023") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),  
+        legend.position = "none")  
+```
+
+To calculate the proportion of each behaviour relative to total screen time in this study
+```{r}
+behavior_duration_summary <- observation_data %>%
+  filter(!Behaviour %in% c("Non-Educational", "Educational")) %>%
+  group_by(Behaviour) %>%
+  summarise(total_duration = sum(Behaviour_duration)) %>%
+  ungroup() %>%
+  mutate(percentage = (total_duration / sum(total_duration)) * 100)
+
+# Plotting the percentage of total behavior duration for each unique behavior
+percentage_plot <- ggplot(behavior_duration_summary, aes(x = reorder(Behaviour, -percentage), y = percentage, fill = Behaviour)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = sprintf("%.2f%%", percentage), y = percentage + 2), 
+            position = position_dodge(width = 0.9), hjust = 0.5, size = 3.5) +
+  coord_flip() + 
+  labs(x = "Behaviour",
+       y = "Percentage of Total Duration (%)") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"),
+        legend.position = "none") # Hide legend if not necessary
+
+print(percentage_plot)
+
+ggsave(filename = "behaviour_duration_percentage_plot.png", 
+       plot = percentage_plot,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+```
+
+To visualise the change in mean screen time for each behaviour
+```{r}
+
+Behaviour_Percentage_Change_plot <- ggplot(comparison_data, aes(x = reorder(Behaviour, Percentage_Change), y = Percentage_Change, fill = Behaviour)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(sprintf("%.1f", Percentage_Change), "%")), vjust = -0.5, position = position_dodge(width = 0.9)) +
+  theme_minimal() +
+  labs(x = "Behaviour", y = "Percentage Change", title = "Change in mean session duration for each behaviour") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white")) +
+  scale_fill_discrete(name = "Behaviour")  # Legend title
+  
+ggsave("Behaviour_Percentage_Change.png", plot = Behaviour_Percentage_Change_plot, width = 10, height = 8, dpi = 300, bg = "white")
+
+
+```
+
+
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+before sleep device check study
+
+1, check if sleep_duration_schoolday is significantly different among different check_device_category levels 
+```{r}
+
+#first of all, turn check_device_category into a factor 
+
+behaviour_wellbeing_analysis$check_device_category <- as.factor(behaviour_wellbeing_analysis$check_device_category)
+
+kruskal_result_mins_before_sleep <- kruskal.test(sleep_duration_schoolday ~ check_device_category, data = behaviour_wellbeing_analysis)
+print(kruskal_result_mins_before_sleep)
+
+```
+```{r}
+
+# Plot for all participants - Sleep Duration on School Days by Device Check Category
+sleep_duration_plot <- ggplot(behaviour_wellbeing_analysis, aes(x = check_device_category, y = sleep_duration_schoolday)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) + 
+  labs(title = "Sleep Duration on School Days by Device Check Category",
+       x = "Device Check Category",
+       y = "Sleep Duration on School Days (hours)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = "white", colour = "NA"), 
+        plot.background = element_rect(fill = "white", colour = "white"))
+
+print(sleep_duration_plot)
+
+ggsave(filename = "sleep_duration_school_days_device_check_category.png", 
+       plot = sleep_duration_plot, 
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+```
+
+2, check if PHQ9_value is significantly different among different check_device_category levels 
+```{r}
+
+kruskal_result_PHQ9 <- kruskal.test(PHQ9_value ~ check_device_category, data = behaviour_wellbeing_analysis)
+print(kruskal_result_PHQ9)
+
+```
+
+
+
+```{r}
+
+# Plot for all participants - PHQ9 Value by Device Check Category
+phq9_value_plot <- ggplot(behaviour_wellbeing_analysis, aes(x = check_device_category, y = PHQ9_value)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) + # Adding jittered scatter points
+  labs(title = "PHQ-9 Value by Device Check Category",
+       x = "Device Check Category",
+       y = "PHQ-9 Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = "white", colour = "NA"), 
+        plot.background = element_rect(fill = "white", colour = "white")) 
+
+# Display the plot
+print(phq9_value_plot)
+
+ggsave(filename = "phq9_value_device_check_category.png", 
+       plot = phq9_value_plot, 
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+```
+3, check if GAD7_value is significantly different among different check_device_category levels 
+
+```{r}
+kruskal_result_GAD7 <- kruskal.test(GAD7_value ~ check_device_category, data = behaviour_wellbeing_analysis)
+print(kruskal_result_GAD7)
+```
+```{r}
+
+gad7_value_plot <- ggplot(behaviour_wellbeing_analysis, aes(x = check_device_category, y = GAD7_value)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) + 
+  labs(title = "GAD-7 Value by Device Check Category",
+       x = "Device Check Category",
+       y = "GAD-7 Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = "white", colour = "NA"), 
+        plot.background = element_rect(fill = "white", colour = "white")) 
+
+# Display the plot
+print(gad7_value_plot)
+
+ggsave(filename = "gad7_value_by_device_check_category.png", 
+       plot = gad7_value_plot, 
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+```
+
+---------------------------------------------------------------------------------------------------------------------
+
+Parental control study 
+```{r}
+# Read the dataset (adjust the file path as needed)
+Q1_data_labels <- read.csv("C:/Users/Jason/OneDrive/桌面/501/Re_ Request for Demographic Dataset and Questionnaire for Thesis Research/Q1_data_labels.csv")
+
+# Filter and select the necessary columns
+parent_control <- Q1_data_labels %>%
+  filter(`Kids_ID` %in% ids_to_select) %>%
+  select(`Kids_ID`, `Parent_control_school_day`, `Parent_control_weekends`)
+
+parent_control[parent_control == ""] <- NA
+parent_control <- na.omit(parent_control)
+
+
+parent_control <- parent_control %>%
+  distinct(`Kids_ID`, .keep_all = TRUE)
+
+parent_control <- parent_control %>%
+  mutate(Parent_control_weekends = case_when(
+    Parent_control_weekends == "Yes - on BOTH Saturday & Sunday" ~ "control on BOTH Saturday & Sunday",
+    Parent_control_weekends == "No - they don't limit the amount of time I spend online on either Saturday or Sunday" ~ "no control on weekend",
+    Parent_control_weekends == "Yes - On Sunday but NOT Saturday" ~ "control on Sunday only",
+    TRUE ~ Parent_control_weekends 
+  ))
+
+parent_control
+```
+
+The behaviour_wellbeing_analysis summarizes children's screen time on both school days and weekends. For the following study, we need to summarize children's screen time on school days and weekends separately
+
+```{r}
+
+# Function to determine if a date is a weekday or weekend
+is_weekend <- function(date) {
+  wday(date) %in% c(1, 7) # in lubridate, Sunday is 1 and Saturday is 7
+}
+
+# Create a logical vector indicating if each date is a weekend
+weekend_indicator <- is_weekend(observation_data$Datetime)
+
+# Split the dataset
+school_days_master_file <- observation_data[!weekend_indicator, ]
+weekends_master_file <- observation_data[weekend_indicator, ]
+
+nrow(school_days_master_file)
+nrow(weekends_master_file)
+nrow(observation_data)
+```
+
+We need to summurise the screen time of the selected apps for both the school day data and the weekend data
+```{r}
+
+#first of all, calculate Total_Duration_school_day. It is the sum of all type 1 behaviours for each unique kid excluding blank and disengaged
+
+
+# Filter out rows where Behaviour is "Blank/Disengaged"
+school_days_data_filtered <- filter(school_days_master_file, Behaviour != "Blank/Disengaged")
+
+# Further filter to include only rows where Behavioural_track is 1
+school_days_data_filtered <- filter(school_days_data_filtered, Behavioural_track == 1)
+
+# Group by Participant_id and summarise to calculate total duration for Behavioural_track == 1
+total_duration_by_participant_schoolday <- school_days_data_filtered %>%
+  group_by(Participant_id) %>%
+  summarise(Total_Duration = sum(Behaviour_duration, na.rm = TRUE))
+
+#Calculate the mean session duration for three selected apps
+school_day_TikTok_summary <- school_days_master_file %>%
+  filter(Behaviour == "TikTok") %>%
+  group_by(Participant_id) %>%
+  summarise(
+    total_TikTok_duration = sum(Behaviour_duration),
+    count_TikTok = n(),
+    mean_TikTok_duration = total_TikTok_duration / count_TikTok
+  )
+
+school_day_gaming_summary <- school_days_master_file %>%
+  filter(Behaviour == "Gaming") %>%
+  group_by(Participant_id) %>%
+  summarise(
+    total_Gaming_duration = sum(Behaviour_duration),
+    count_Gaming = n(),
+    mean_Gaming_duration = total_Gaming_duration / count_Gaming
+  )
+
+school_day_youtube_summary <- school_days_master_file %>%
+  filter(Behaviour == "Youtube") %>%
+  group_by(Participant_id) %>%
+  summarise(
+    total_YouTube_duration = sum(Behaviour_duration),
+    count_YouTube = n(),
+    mean_YouTube_duration = total_YouTube_duration / count_YouTube
+  )
+
+#join the four datasets
+school_day_app_summary <- total_duration_by_participant_schoolday %>%
+  full_join(school_day_TikTok_summary, by = "Participant_id") %>%
+  full_join(school_day_gaming_summary, by = "Participant_id") %>%
+  full_join(school_day_youtube_summary, by = "Participant_id")
+
+#Make sure all NA values are 0
+school_day_app_summary <- school_day_app_summary %>%
+  mutate(across(everything(), ~replace_na(., 0)))
+
+#Calculate the duration % of each selected app
+school_day_app_summary <- school_day_app_summary %>%
+  mutate(
+    Gaming_Duration_Percentage = (total_Gaming_duration / Total_Duration) * 100,
+    TikTok_Duration_Percentage = (total_TikTok_duration / Total_Duration) * 100,
+    YouTube_Duration_Percentage = (total_YouTube_duration / Total_Duration) * 100)
+
+school_day_app_summary
+
+```
+
+Now, we reduce the number of levels for parental control to 2. This binary variable is called Parent_control_schooldays_bi
+```{r}
+parent_control_schooldays_filtered <- parent_control %>%
+  select(Kids_ID, Parent_control_school_day) %>%
+  filter(Parent_control_school_day != "I don't know") %>%
+  mutate(Parent_control_schooldays_bi = case_when(
+    Parent_control_school_day %in% c("Sometimes, somedays", "Every day") ~ "has control",
+    Parent_control_school_day == "Never" ~ "no control",
+    TRUE ~ as.character(Parent_control_school_day)  
+  ))
+
+#To join all datasets 
+School_day_parent_control_summary <- school_day_app_summary %>%
+  full_join(parent_control, by = c("Participant_id" = "Kids_ID"))
+
+School_day_parent_control_summary_bi <- school_day_app_summary %>%
+inner_join(parent_control_schooldays_filtered , by = c("Participant_id" = "Kids_ID"))
+
+School_day_parent_control_summary
+
+School_day_parent_control_summary_bi
+```
+
+repeat the above operations for weekend data
+
+
+```{r}
+
+# Filter out rows where Behaviour is "Blank/Disengaged" for weekend data
+weekends_data_filtered <- filter(weekends_master_file, Behaviour != "Blank/Disengaged")
+
+# Further filter to include only rows where Behavioural_track is 1
+weekends_data_filtered <- filter(weekends_data_filtered, Behavioural_track == 1)
+
+# Group by Participant_id and summarise to calculate total duration for Behavioural_track == 1
+total_duration_by_participant_weekend <- weekends_data_filtered %>%
+  group_by(Participant_id) %>%
+  summarise(Total_Duration = sum(Behaviour_duration, na.rm = TRUE))
+
+# Summaries for TikTok, Gaming, and YouTube on weekends
+weekend_TikTok_summary <- weekends_master_file %>%
+  filter(Behaviour == "TikTok") %>%
+  group_by(Participant_id) %>%
+  summarise(
+    total_TikTok_duration = sum(Behaviour_duration),
+    count_TikTok = n(),
+    mean_TikTok_duration = total_TikTok_duration / count_TikTok
+  )
+
+weekend_gaming_summary <- weekends_master_file %>%
+  filter(Behaviour == "Gaming") %>%
+  group_by(Participant_id) %>%
+  summarise(
+    total_Gaming_duration = sum(Behaviour_duration),
+    count_Gaming = n(),
+    mean_Gaming_duration = total_Gaming_duration / count_Gaming
+  )
+
+weekend_youtube_summary <- weekends_master_file %>%
+  filter(Behaviour == "Youtube") %>%
+  group_by(Participant_id) %>%
+  summarise(
+    total_YouTube_duration = sum(Behaviour_duration),
+    count_YouTube = n(),
+    mean_YouTube_duration = total_YouTube_duration / count_YouTube
+  )
+
+# Join the four datasets for weekends
+weekend_app_summary <- total_duration_by_participant_weekend %>%
+  full_join(weekend_TikTok_summary, by = "Participant_id") %>%
+  full_join(weekend_gaming_summary, by = "Participant_id") %>%
+  full_join(weekend_youtube_summary, by = "Participant_id")
+
+# Make sure all NA values are 0
+weekend_app_summary <- weekend_app_summary %>%
+  mutate(across(everything(), ~replace_na(., 0)))
+
+# Calculate the duration % of each app for weekends
+weekend_app_summary <- weekend_app_summary %>%
+  mutate(
+    Gaming_Duration_Percentage = (total_Gaming_duration / Total_Duration) * 100,
+    TikTok_Duration_Percentage = (total_TikTok_duration / Total_Duration) * 100,
+    YouTube_Duration_Percentage = (total_YouTube_duration / Total_Duration) * 100)
+
+
+weekend_app_summary
+```
+
+
+Once again, reduce the number of weekend parental control levels to 2. 
+```{r}
+
+  parent_control_weekends_filtered <- parent_control %>%
+  select(Kids_ID, Parent_control_weekends) %>%
+  filter(Parent_control_weekends != "I don't know") %>%
+  mutate(Parent_control_weekends_bi = case_when(
+    Parent_control_weekends == "no control on weekend" ~ "no control",
+    Parent_control_weekends %in% c("control on BOTH Saturday & Sunday", "control on Sunday only") ~ "has control",
+    TRUE ~ as.character(Parent_control_weekends) 
+  ))
+
+#To join all datasets 
+weekend_parent_control_summary <- weekend_app_summary %>%
+  full_join(parent_control, by = c("Participant_id" = "Kids_ID"))
+
+weekend_parent_control_summary_bi <- weekend_app_summary %>%
+inner_join(parent_control_weekends_filtered , by = c("Participant_id" = "Kids_ID"))
+
+weekend_parent_control_summary
+
+weekend_parent_control_summary_bi
+```
+
+The two plots below shows if we do not reduce the number of levels for patental control, some levels will only have 2 observations. 
+
+check the count of each Parent_control_school_day level 
+```{r}
+
+ggplot(School_day_parent_control_summary, aes(x = Parent_control_school_day)) +
+  geom_bar() +
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5) +  
+  theme_minimal() +
+  labs(title = "Count of Observations by Parent Control on School Days ",
+       x = "Parent Control Level on School Days",
+       y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+ggplot(weekend_parent_control_summary, aes(x = Parent_control_weekends)) +
+  geom_bar() +
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5) +  # Add count labels just above the bars
+  theme_minimal() +
+  labs(title = "Count of Observations by Parent Control on Weekends",
+       x = "Parent Control Level on Weekends",
+       y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+the two plots below show the number of observations across each level after the adjustment
+```{r}
+# Assuming School_day_parent_control_summary_bi is your dataframe and it has a variable called Parent_control_schooldays_bi
+school_day_parent_control_bi_plot <- ggplot(School_day_parent_control_summary_bi, aes(x = Parent_control_schooldays_bi)) +
+  geom_bar(fill = "steelblue") +  # Fill color for the bars
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -1, color = "black") +  
+  theme_minimal() +
+  labs(x = "Parental Control Level on School Days",
+       y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+  panel.background = element_rect(fill = "white", colour = "white"),
+  plot.background = element_rect(fill = "white", colour = "white"))
+
+
+# Display the plot
+print(school_day_parent_control_bi_plot)
+
+ggsave("school_day_parent_control_bi_plot.png", school_day_parent_control_bi_plot, width = 8, height = 6, unit = "in", dpi = 300)
+
+
+```
+
+
+```{r}
+# Bar chart with counts for Parent_control_weekends_bi
+weekend_parent_control_bi_plot <- ggplot(weekend_parent_control_summary_bi, aes(x = Parent_control_weekends_bi)) +
+  geom_bar(fill = "steelblue") +  # Adding a fill color for better visual
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5) +  
+  theme_minimal() +
+  labs(x = "Parental Control Level on Weekends",
+       y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_rect(fill = "white", colour = "white"),  
+        plot.background = element_rect(fill = "white", colour = "white")) 
+
+# Display the plot
+print(weekend_parent_control_bi_plot)
+
+# Save the plot
+ggsave("weekend_parent_control_bi_plot.png", weekend_parent_control_bi_plot, width = 8, height = 6, unit = "in", dpi = 300)
+```
+
+
+based on the bi_weekend data, plot the app_percentage 
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+# TikTok Duration Percentage plot
+TikTok_duration_percentage_plot <- ggplot(weekend_parent_control_summary_bi, aes(x = Parent_control_weekends_bi, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "TikTok Duration Percentage by Parental Control on Weekends",
+       x = "Parental Control Level on Weekends",
+       y = "TikTok Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Gaming Duration Percentage plot
+gaming_duration_percentage_plot <- ggplot(weekend_parent_control_summary_bi, aes(x = Parent_control_weekends_bi, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Gaming Duration Percentage by Parental Control on Weekends",
+       x = "Parental Control Level on Weekends",
+       y = "Gaming Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# YouTube Duration Percentage plot
+youtube_duration_percentage_plot <- ggplot(weekend_parent_control_summary_bi, aes(x = Parent_control_weekends_bi, y = YouTube_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "YouTube Duration Percentage by Parental Control on Weekends",
+       x = "Parental Control Level on Weekends",
+       y = "YouTube Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Mean TikTok Duration plot
+mean_tiktok_duration_plot <- ggplot(weekend_parent_control_summary_bi, aes(x = Parent_control_weekends_bi, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Mean TikTok Duration by Parental Control on Weekends",
+       x = "Parental Control Level on Weekends",
+       y = "Mean TikTok Duration (minutes)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Mean Gaming Duration plot
+mean_gaming_duration_plot <- ggplot(weekend_parent_control_summary_bi, aes(x = Parent_control_weekends_bi, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Mean Gaming Duration by Parental Control on Weekends",
+       x = "Parental Control Level on Weekends",
+       y = "Mean Gaming Duration (minutes)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Mean YouTube Duration plot
+mean_youtube_duration_plot <- ggplot(weekend_parent_control_summary_bi, aes(x = Parent_control_weekends_bi, y = mean_YouTube_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Mean YouTube Duration by Parental Control on Weekends",
+       x = "Parental Control Level on Weekends",
+       y = "Mean YouTube Duration (minutes)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Arrange the plots into a grid
+combined_weekend_plots <- arrangeGrob(
+  mean_tiktok_duration_plot, mean_gaming_duration_plot, mean_youtube_duration_plot,
+  TikTok_duration_percentage_plot, gaming_duration_percentage_plot, youtube_duration_percentage_plot,
+  nrow = 2
+)
+
+
+ggsave("combined_weekend_plots.png", combined_weekend_plots, width = 20, height = 12, unit = "in")
+
+
+```
+
+
+based on the bi_school_day data, plot the app_percentage 
+
+```{r}
+
+TikTok_duration_percentage_plot_school <- ggplot(School_day_parent_control_summary_bi, aes(x = Parent_control_schooldays_bi, y = TikTok_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "TikTok Duration Percentage by Parental Control on School Days",
+       x = "Parental Control Level on School Days",
+       y = "TikTok Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Gaming Duration Percentage plot for School Days
+gaming_duration_percentage_plot_school <- ggplot(School_day_parent_control_summary_bi, aes(x = Parent_control_schooldays_bi, y = Gaming_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Gaming Duration Percentage by Parental Control on School Days",
+       x = "Parental Control Level on School Days",
+       y = "Gaming Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# YouTube Duration Percentage plot for School Days
+youtube_duration_percentage_plot_school <- ggplot(School_day_parent_control_summary_bi, aes(x = Parent_control_schooldays_bi, y = YouTube_Duration_Percentage)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "YouTube Duration Percentage by Parental Control on School Days",
+       x = "Parental Control Level on School Days",
+       y = "YouTube Duration Percentage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Mean TikTok Duration plot for School Days
+mean_tiktok_duration_plot_school <- ggplot(School_day_parent_control_summary_bi, aes(x = Parent_control_schooldays_bi, y = mean_TikTok_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Mean TikTok Duration by Parental Control on School Days",
+       x = "Parental Control Level on School Days",
+       y = "Mean TikTok Duration (minutes)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Mean Gaming Duration plot for School Days
+mean_gaming_duration_plot_school <- ggplot(School_day_parent_control_summary_bi, aes(x = Parent_control_schooldays_bi, y = mean_Gaming_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Mean Gaming Duration by Parental Control on School Days",
+       x = "Parental Control Level on School Days",
+       y = "Mean Gaming Duration (minutes)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Mean YouTube Duration plot for School Days
+mean_youtube_duration_plot_school <- ggplot(School_day_parent_control_summary_bi, aes(x = Parent_control_schooldays_bi, y = mean_YouTube_duration)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Mean YouTube Duration by Parental Control on School Days",
+       x = "Parental Control Level on School Days",
+       y = "Mean YouTube Duration (minutes)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Arrange the plots into a grid
+combined_plots_school <- arrangeGrob(
+  mean_tiktok_duration_plot_school, mean_gaming_duration_plot_school, mean_youtube_duration_plot_school,
+  TikTok_duration_percentage_plot_school, gaming_duration_percentage_plot_school, youtube_duration_percentage_plot_school,
+  nrow = 2
+)
+
+ggsave("combined_plots_school.png", combined_plots_school, width = 20, height = 12, unit = "in")
+
+```
+
+From the data for both school days and weekends, we observe that TikTok screen time—measured both relatively and absolutely—varies significantly in the presence of parental control. However, for the other two activities, Gaming and YouTube, such variations are not significant. 
+
+The influence of parental control seems to differ by the type of digital activity, with TikTok being more affected than Gaming or YouTube.
+
+
+---------------------------------------------------------------------------------------------------------------------
+
+Just some final tests for chapter 5 of this study 
+
+```{r}
+kruskal_result <- kruskal.test(sleep_duration_schoolday ~ Ethnic.group, data = behaviour_wellbeing_analysis)
+kruskal_result
+```
+
+
+```{r}
+kruskal_result_decile <- kruskal.test(sleep_duration_schoolday ~ Decile_group, data = behaviour_wellbeing_analysis)
+kruskal_result_decile
+```
+
+```{r}
+sleep_ethnic_plot <- ggplot(behaviour_wellbeing_analysis, aes(x = Ethnic.group, y = sleep_duration_schoolday)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Sleep Duration on School Days Across Ethnic Groups",
+       x = "Ethnic Group",
+       y = "Sleep Duration (School Day)") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"))
+
+ggsave("sleep_ethnic_plot.png", plot = sleep_ethnic_plot, width = 10, height = 8, dpi = 300)
+sleep_decile_plot <- ggplot(behaviour_wellbeing_analysis, aes(x = Decile_group, y = sleep_duration_schoolday)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, color = "blue", alpha = 0.5) +
+  labs(title = "Sleep Duration on School Days Across Decile Groups",
+       x = "Decile Group",
+       y = "Sleep Duration (School Day)") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"))
+
+ggsave("sleep_decile_plot.png", plot = sleep_decile_plot, width = 10, height = 8, dpi = 300)
+
+combined_sleep_demo_plots <- grid.arrange(sleep_ethnic_plot, sleep_decile_plot, ncol = 2)
+
+ggsave("combined_sleep_demo_plots.png", combined_sleep_demo_plots, width = 20, height = 8, dpi = 300)
+
+
+```
+
+
+```{r}
+# Create the contingency table for check_device_category and Ethnic.group
+contingency_table_ethnic <- table(behaviour_wellbeing_analysis$check_device_category, behaviour_wellbeing_analysis$Ethnic.group)
+
+# Perform the chi-squared test
+chi_squared_test_result_ethnic <- chisq.test(contingency_table_ethnic)
+
+# Print the result
+print(chi_squared_test_result_ethnic)
+
+```
+```{r}
+# Create the contingency table for Decile_group and check_device_category
+contingency_table_decile <- table(behaviour_wellbeing_analysis$Decile_group, behaviour_wellbeing_analysis$check_device_category)
+
+# Perform the chi-squared test
+chi_squared_test_result_decile <- chisq.test(contingency_table_decile)
+
+# Print the result
+print(chi_squared_test_result_decile)
+
+```
+
+```{r}
+
+# Calculate the percentages
+temp_df <- behaviour_wellbeing_analysis %>%
+  group_by(Ethnic.group, check_device_category) %>%
+  summarise(count = n()) %>%
+  mutate(perc = count / sum(count) * 100) %>%
+  ungroup()
+
+# Plot
+percentage_device_check_by_ethnic_group_plot <- ggplot(temp_df, aes(x = Ethnic.group, y = perc, fill = check_device_category)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = sprintf("%.1f%%", perc)), position = position_dodge(width = 0.9), vjust = -0.25) +
+  labs(title = "Percentage of Device Check Category Across Ethnic Groups",
+       x = "Ethnic Group",
+       y = "Percentage",
+       fill = "Device Category") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("percentage_device_check_by_ethnic_group.png", plot = percentage_device_check_by_ethnic_group_plot, width = 10, height = 8, dpi = 300, bg = "white")
+
+
+```
+
+
+```{r}
+# Calculate the percentages for Decile_group
+temp_df_decile <- behaviour_wellbeing_analysis %>%
+  group_by(Decile_group, check_device_category) %>%
+  summarise(count = n()) %>%
+  mutate(perc = count / sum(count) * 100)
+
+# Plot for Decile_group
+percentage_device_check_by_decile_group_plot <- ggplot(temp_df_decile, aes(x = Decile_group, y = perc, fill = check_device_category)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = sprintf("%.1f%%", perc)), position = position_dodge(width = 0.9), vjust = -0.25) +
+  labs(title = "Percentage of Device Check Category Across Decile Groups",
+       x = "Decile Group",
+       y = "Percentage",
+       fill = "Device Category") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Save the plot
+ggsave("percentage_device_check_by_decile_group.png", plot = percentage_device_check_by_decile_group_plot, width = 10, height = 8, dpi = 300, bg = "white")
+```
+
+
+```{r}
+write.csv(behaviour_wellbeing_analysis, "behaviour_wellbeing_analysis.csv", row.names = FALSE)
+```

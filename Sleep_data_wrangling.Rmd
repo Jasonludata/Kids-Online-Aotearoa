@@ -1,0 +1,443 @@
+---
+title: "Sleep_data_wrangling"
+author: "Jason Lu"
+date: "2024-01-09"
+output: html_document
+---
+
+sleep_data data frame is defined in Data Extract.rmd
+
+----------------------------------------------------------------------------------------------------------------------
+
+This part of the analysis aims to test whether children's sleep patterns on school days significantly differ from those on weekends. The conclusion of this analysis will determine whether weekend sleep durations should be included for further study
+
+```{r}
+# Load  libraries
+library(ggplot2)
+library(tidyr)
+
+# Reshape the data to long format
+data_long_wake <- gather(sleep_data, key = "variable", value = "value", wake_schlday, wake_satam, wake_sunam)
+
+# Create a histogram and use facet_wrap to display them together
+ggplot(data_long_wake, aes(x = value)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+  facet_wrap(~ variable, scales = "free") +
+  ggtitle("Histograms of wake_schlday, wake_satam, and wake_sunam") +
+  xlab("Value") +
+  ylab("Frequency")
+```
+It is a bit hard to tell the normality based on the histogram. Therefore we can use other statistical methods such as QQplot and Shapiro-Wilk test
+
+QQPlot - we can clearly see deviation from normality. Therefore, a log transformation is needed. 
+```{r}
+par(mfrow = c(1, 3))  # Set up the plot area to have 3 plots in a row
+
+# Q-Q plots for each variable
+qqnorm(sleep_data$wake_schlday, main = "Q-Q Plot for wake_schlday")
+qqline(sleep_data$wake_schlday)
+
+qqnorm(sleep_data$wake_satam, main = "Q-Q Plot for wake_satam")
+qqline(sleep_data$wake_satam)
+
+qqnorm(sleep_data$wake_sunam, main = "Q-Q Plot for wake_sunam")
+qqline(sleep_data$wake_sunam)
+```
+
+Shapiro-Wilk test
+```{r}
+shapiro.test(sleep_data$wake_schlday)
+shapiro.test(sleep_data$wake_satam)
+shapiro.test(sleep_data$wake_sunam)
+```
+all P values are smaller than the 0.05 threshold, indicating all variables significantly deviate from a normal distribution. Therefore, data transformation is required if we aim to use ANOVA for statistical testing. 
+
+Log transformation 
+```{r}
+sleep_data$wake_schlday_log <- log(sleep_data$wake_schlday)
+sleep_data$wake_satam_log <- log(sleep_data$wake_satam)
+sleep_data$wake_sunam_log <- log(sleep_data$wake_sunam)
+```
+
+Check normality again using Shapiro-Wilk test. We can still observe significant deviation from normality
+```{r}
+par(mfrow = c(1, 3))  # Set up the plot area to have 3 plots in a row
+
+# Q-Q plot for wake_schlday_log
+qqnorm(sleep_data$wake_schlday_log, main = "Q-Q Plot for wake_schlday_log")
+qqline(sleep_data$wake_schlday_log, col = "red")
+
+# Q-Q plot for wake_satam_log
+qqnorm(sleep_data$wake_satam_log, main = "Q-Q Plot for wake_satam_log")
+qqline(sleep_data$wake_satam_log, col = "red")
+
+# Q-Q plot for wake_sunam_log
+qqnorm(sleep_data$wake_sunam_log, main = "Q-Q Plot for wake_sunam_log")
+qqline(sleep_data$wake_sunam_log, col = "red")
+
+```
+
+Shapiro-Wilk test applied on the logged results show the same conclusion 
+
+```{r}
+# Check normality again using Shapiro-Wilk test
+shapiro.test(sleep_data$wake_schlday_log)
+shapiro.test(sleep_data$wake_satam_log)
+shapiro.test(sleep_data$wake_sunam_log)
+```
+
+
+Therefore, we cannot use ANOVA to test statistical difference of the wake up data as one variable remains non-normal.
+We apply the Kruskal-Wallis Test instead as it tolerates non-normality
+
+
+```{r}
+library(reshape2)
+kruskal_test_result <- kruskal.test(value ~ variable, data = data_long_wake)
+print(kruskal_test_result)
+```
+Since the p-value is less than 0.05, we have evidence to conclude that significant differences in the wake-up times exist across the different days (school days, Saturdays, Sundays).
+
+----------------------------------------------------------------------------------------------------------------------
+
+We now use the same method to examine the bed time data. relevant fields are: bed_schlnight, bed_satpm, bed_sunpm
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(tidyr)
+
+# Assuming your data is in a dataframe called 'data'
+# Reshape the data to long format for bed_schlnight, bed_satpm, bed_sunpm
+data_long_bedtimes <- gather(sleep_data, key = "variable", value = "value", bed_schlnight, bed_satpm, bed_sunpm)
+
+# Create a histogram and use facet_wrap to display them together
+ggplot(data_long_bedtimes, aes(x = value)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+  facet_wrap(~ variable, scales = "free") +
+  ggtitle("Histograms of bed_schlnight, bed_satpm, and bed_sunpm") +
+  xlab("Bedtime") +
+  ylab("Frequency")
+
+```
+
+
+Seems all variables are right skewed. We tried transformation methods for right-skewed data including log and square root. However, neither method is effective in building normality. Therefore, we apply the Kruskal-Wallis Test again in this case 
+
+```{r}
+data_long_bedtimes <- gather(sleep_data, key = "variable", value = "value", bed_schlnight, bed_satpm, bed_sunpm)
+kruskal_test_result2 <- kruskal.test(value ~ variable, data = data_long_bedtimes)
+print(kruskal_test_result2)
+```
+
+Once again, the result shows kids' sleep patterns during school days are significantly different from the weekends. 
+
+----------------------------------------------------------------------------------------------------------------------
+
+We now use the same method to examine the sleep time data. relavant fields are: sleep_schlnight, sleep_satpm, sleep_sunpm
+
+```{r}
+# Reshape the data to long format for sleep_schlnight, sleep_satpm, sleep_sunpm
+data_long_sleep <- gather(sleep_data, key = "variable", value = "value", sleep_schlnight, sleep_satpm, sleep_sunpm)
+
+# Create a histogram and use facet_wrap to display them together
+ggplot(data_long_sleep, aes(x = value)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+  facet_wrap(~ variable, scales = "free") +
+  ggtitle("Histograms of sleep_schlnight, sleep_satpm, and sleep_sunpm") +
+  xlab("Sleep Time") +
+  ylab("Frequency")
+
+```
+We tried transformation methods for right-skewed data including log and square root. However, neither method is effective in building normality. Therefore, we apply the Kruskal-Wallis Test again in this case 
+
+```{r}
+data_long_sleep <- gather(sleep_data, key = "variable", value = "value", sleep_schlnight, sleep_satpm, sleep_sunpm)
+kruskal_test_result2 <- kruskal.test(value ~ variable, data = data_long_sleep)
+print(kruskal_test_result2)
+
+```
+
+Once again, the result shows kids' sleep patterns during school days are significantly different from the weekends. 
+
+----------------------------------------------------------------------------------------------------------------------
+
+We can conclude that children sleep patterns during school days and weekends are significantly different. For further analysis, this study focuses on the sleep patterns of school days. It can be justified by the following reasons: 
+
+1, School days occupy five out of seven days of the week. This further means sleep patterns during school days have more weight in influencing children's overall sleep habits and physical development. 
+
+2, children have more consistant sleep patterns during school days. By Contrast, it is more likely to have variable schedules during weekends. 
+
+----------------------------------------------------------------------------------------------------------------------
+
+This part aims to calculate sleep duration of each kid during school days. The calculation is based on Questionaire 2 data labels
+```{r}
+# Load the libraries
+library(readr)
+library(dplyr)
+
+# Set the file path for the CSV file
+file_path <- "C:/Users/Jason/OneDrive/桌面/501/Re_ Request for Demographic Dataset and Questionnaire for Thesis Research/Q2_data_labels.csv"
+
+# Read the CSV file
+Q2_data_labels <- read_csv(file_path)
+
+# List of Kids IDs to filter
+ids_to_select <- c("Avalon19", "Avalon20", "Avalon21", "Avalon22", "Sacredheart24",
+                   "Sacredheart25", "Swis26", "Swis27", "Swis28", "Ferg29", "Ferg30",
+                   "Ferg31", "Rar32", "Rar33", "Rar34", "Rar36", "Rar37", "Rar38",
+                   "Rar39", "Rar40", "Rar41", "Rkur43", "Rkur46", "Rkur47", "Rkur48",
+                   "Rkur49", "Rkur50", "Rkur52", "Brook53", "Brook54", "Brook55",
+                   "Brook56", "Brook57", "Brook58", "Otari60", "Otari61", "Papa62",
+                   "Papa63", "Swis64", "Swis65", "Swis67", "Swis69", "Swis70", "Swis71",
+                   "Swis72", "Ourlady73")
+
+# Filter the data based on the given Kids_ID
+sleep_data_labels <- Q2_data_labels %>%
+  filter(`Kids ID` %in% ids_to_select, `Survey Timestamp` != "[not completed]")
+
+# Select and rename the required columns
+sleep_data_labels <- sleep_data_labels %>%
+  select(
+    record_id= `Record ID`,
+    Kids_ID = `Kids ID`,
+    wake_up_schoolday = `23.a) - What time do you usually wake up on a normal school day? (Monday - Friday)`,
+    go_to_bed_schoolday = `23.b) - Around what time do you normally go to bed.........but NOT to sleep - on a school night(Monday-Friday)?`,
+    fall_asleep_schoolday = `23.c) - Around what time do you usually fall asleep - on a normal school night (Monday-Friday)?`,
+    wake_up_sat = `25.a) - Around what time do you usually wake up on a normal Saturday morning?`,
+    go_to_bed_sat = `25.b) - Around what time do you normally go to bed.........but NOT to sleep - on a Saturday night?`,
+    fall_asleep_sat = `25.c) - Around what time do you usually fall asleep - on a normal Saturday night?`,
+    wake_up_sun = `26.a) - What time do you usually wake up on a normal Sunday morning?`,
+    go_to_bed_sun = `26.b) - Around what time do you normally go to bed.........but NOT to sleep - on a Sunday night?`,
+    fall_asleep_sun = `26.c) - Around what time do you usually fall asleep - on a normal Sunday night?`,
+
+)
+
+sleep_data_labels
+
+```
+
+till now, all values in sleep_data_labels are chr [1:46]. In order to calculate sleep duration for each kid, I need to extract the end time of each half-hour session.
+
+```{r}
+# Function to remove text before and including the dash
+remove_text_before_dash <- function(x) {
+  return(gsub(".*-", "", x))
+}
+
+# Apply the function to all applicable columns
+sleep_data_labels <- sleep_data_labels %>%
+  mutate(across(where(is.character), ~ remove_text_before_dash(.x)))
+
+
+# View the first few rows of the updated dataset
+head(sleep_data_labels)
+
+#export  sleep_data_labels
+write.csv(sleep_data_labels, "C:/Users/Jason/OneDrive/桌面/501/Re_ Request for Demographic Dataset and Questionnaire for Thesis Research/RQ3/Sleep hours/sleep_data_label.csv", row.names = FALSE)
+```
+
+
+Now, I can calculate the sleep duration of each kid using a function
+```{r}
+
+
+library(lubridate)
+
+# Function to calculate sleep duration
+calculate_sleep_duration <- function(fall_asleep, wake_up) {
+  fall_asleep_time <- parse_date_time(fall_asleep, orders = c("I:M%p", "I%p"))
+  wake_up_time <- parse_date_time(wake_up, orders = c("I:M%p", "I%p"))
+  
+  # Adjust for cases where wake up time is on the next day
+  wake_up_time <- ifelse(wake_up_time < fall_asleep_time, wake_up_time + days(1), wake_up_time)
+  
+  # Calculate the duration and convert to hours
+  duration <- as.numeric(difftime(wake_up_time, fall_asleep_time, units = "hours"))
+  return(round(duration, 1))
+}
+
+# Apply the function to the dataset
+sleep_data_labels$sleep_duration_schoolday <- mapply(calculate_sleep_duration, 
+                                                     sleep_data_labels$fall_asleep_schoolday, 
+                                                     sleep_data_labels$wake_up_schoolday)
+
+head(sleep_data_labels)
+
+
+```
+
+
+Create a new dataset named sleep_hours_schoolday, which contains Kids_ID, sleep_duration_schoolday, and a boolean type variable called Underslept whcih uses the CDC's recommendation of sleep hours for kids of age (8 hours per day) as the threshold
+```{r}
+
+sleep_hours_schoolday <- sleep_data_labels %>%
+  mutate(Underslept = sleep_duration_schoolday < 8) %>%
+  select(record_id, Kids_ID, sleep_duration_schoolday, Underslept)
+
+sleep_hours_schoolday
+
+```
+
+
+Visualise the sleep duration for all participants
+```{r}
+sleep_hours_schoolday <- sleep_hours_schoolday %>%
+  mutate(record_id = factor(record_id, levels = sleep_hours_schoolday$record_id[order(-sleep_duration_schoolday)]))
+
+sleep_duration_plot <- ggplot(sleep_hours_schoolday, aes(x = factor(record_id), y = sleep_duration_schoolday, fill = sleep_duration_schoolday < 8)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "green"),
+                    labels = c("TRUE" = "Undersleep", "FALSE" = "Normal Sleep"),
+                    name = "Sleep Status") +
+  labs(x = "Record ID",
+       y = "Sleep Duration (hours)",
+       fill = "Underslept") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"),
+        legend.position = "right")
+
+# Display the plot
+print(sleep_duration_plot)
+
+# Save the plot
+ggsave(filename = "sleep_duration_schoolday_distribution.png", 
+       plot = sleep_duration_plot,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+```
+
+----------------------------------------------------------------------------------------------------------------------
+
+the later section studies before sleep device use, a commonly known bad habit. The related data for this section is question 27 in Questionaire 2 
+```{r}
+
+# Create last_screen_use_labels dataframe
+
+last_screen_use_labels <- Q2_data_labels %>%
+  filter(`Kids ID` %in% ids_to_select) %>%
+  select(
+    Kids_ID = `Kids ID`,
+    last_screen_use = `27.a) - Before shutting your eyes and trying to go to sleep - when would you have typically, last used a screen device (such as; phone, laptop, TV..)?`
+  ) %>%
+  filter(!is.na(last_screen_use))
+
+last_screen_use_labels
+```
+
+Visualize the distribution of observations for each level under last_screen_use
+```{r}
+
+# First, calculate counts and percentages for last_screen_use
+last_screen_use_counts <- last_screen_use_labels %>%
+  group_by(last_screen_use) %>%
+  summarise(n = n()) %>%
+  mutate(Percentage = (n / sum(n)) * 100)
+
+# Creating the plot for Last Screen Use
+device_check_before_plot <- ggplot(last_screen_use_counts, aes(x = as.factor(last_screen_use), y = n, fill = as.factor(last_screen_use))) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(n, "(", sprintf("%.2f%%", Percentage), ")", sep = "")),
+            position = position_dodge(width = 0.9), vjust = -0.25) +
+  labs(y = "Count", x = "") + 
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white")) +
+  scale_fill_discrete(name = "Device Check Category")
+
+# Display the plot
+print(device_check_before_plot)
+
+# Save the plot
+ggsave(filename = "device_check_before_plot.png", 
+       plot = device_check_before_plot, 
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+```
+
+Here, I aim to perform mean data inputation for the "I don't know" answer. First of all, we encode the other five answers into minutes 
+```{r}
+last_screen_use_labels <- last_screen_use_labels %>%
+  mutate(mins_before_sleep = case_when(
+    last_screen_use == "Don't know" ~ NA_real_,
+    last_screen_use == "Just before trying to sleep" ~ 0,
+    last_screen_use == "1 hour before trying to sleep" ~ 60,
+    last_screen_use == "2+ hours before trying to sleep" ~ 120,
+    TRUE ~ as.numeric(gsub(" minutes before trying to sleep", "", last_screen_use))
+  ))
+
+
+last_screen_use_labels
+```
+
+I chose median instead of mean because our data set is skewed and mean will not be an accurate reflect of central tendency. (However, both mean and median data imputation gives the same result, which is 30)
+
+we first calculate the mean of all present numerical entries, excluding any NAs. This calculated mean is then rounded to the nearest multiple of 10. Subsequently, we use this rounded mean value to replace all NA instances within the mins_before_sleep column. 
+
+```{r}
+median_mins_before_sleep <- median(last_screen_use_labels$mins_before_sleep, na.rm = TRUE)
+
+# Replace NA values with the rounded mean
+last_screen_use_labels$mins_before_sleep[is.na(last_screen_use_labels$mins_before_sleep)] <- median_mins_before_sleep
+
+last_screen_use_labels
+```
+
+```{r}
+hist(last_screen_use_labels$mins_before_sleep)
+
+last_screen_use_labels <- last_screen_use_labels %>%
+  mutate(check_device_category = case_when(
+    mins_before_sleep == 0 ~ "check device right before sleep",
+    mins_before_sleep > 0 & mins_before_sleep <= 30 ~ "check device in less than 30 mins before sleep",
+    mins_before_sleep > 30 ~ "check device in more than 30 mins before sleep",
+    TRUE ~ NA_character_ # for handling potential NA values
+  ))
+
+last_screen_use_labels
+```
+
+We can visualise the number of observations under the adjusted levels. 
+```{r}
+device_check_category_counts <- last_screen_use_labels %>%
+  group_by(check_device_category) %>%
+  summarise(n = n()) %>%
+  mutate(Percentage = (n / sum(n)) * 100)
+
+# Creating the plot for Device Check Category
+device_check_after_plot <- ggplot(device_check_category_counts, aes(x = as.factor(check_device_category), y = n, fill = as.factor(check_device_category))) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(n, "(", sprintf("%.2f%%", Percentage), ")", sep = "")),
+            position = position_dodge(width = 0.9), vjust = -0.25) +
+  labs(y = "Count", x = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white")) +
+  scale_fill_discrete(name = "Device Check Category")
+
+# Display the plot
+print(device_check_after_plot)
+
+# Save the plot
+ggsave(filename = "device_check_after_plot.png", 
+       plot = device_check_after_plot, 
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+```
+
+combine sleep_hours_schoolday and last_screen_use_labels, name it as sleep_hours_schoolday
+```{r}
+
+sleep_hours_schoolday <- merge(sleep_hours_schoolday, last_screen_use_labels, by = "Kids_ID", all = TRUE)
+sleep_hours_schoolday
+```
+
+----------------------------------------------------------------------------------------------------------------------
+
+
+

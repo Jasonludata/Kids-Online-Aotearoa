@@ -1,0 +1,509 @@
+---
+title: "Wellbeing EDA"
+author: "Jason Lu"
+date: "2024-01-14"
+output: html_document
+---
+
+
+First of all, we visualse WHO-5. This section involves variables who5_21a	who5_21b	who5_21c	who5_21d	who5_21e 
+```{r}
+WHO5_plot <- function(v, column_name, title) {
+  ggplot(mental_wellbeing_data, aes(x=factor(mental_wellbeing_data[[column_name]], 
+                            levels = 1:6, 
+                            labels = c("All the time", "Most of the time", "More than half of the time",
+                                       "Less than half of the time", "Some of the time", "At no time")))) +
+    geom_bar(fill="steelblue") +
+    labs(title=title, x="", y="Count") +  # Removed x-axis label as the labels are self-explanatory
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 46, hjust = 1))
+}
+
+p1_WHO5 <- WHO5_plot(mental_wellbeing_data, "who5_21a", "I have felt cheerful and in good spirits")
+p2_WHO5 <- WHO5_plot(mental_wellbeing_data, "who5_21b", "I have felt calm and relaxed")
+p3_WHO5 <- WHO5_plot(mental_wellbeing_data, "who5_21c", "I have felt active and vigorous")
+p4_WHO5 <- WHO5_plot(mental_wellbeing_data, "who5_21d", "I woke up feeling fresh and rested")
+p5_WHO5 <- WHO5_plot(mental_wellbeing_data, "who5_21e", "My daily life has been filled with things that interest me")
+
+# Print the WHO5 plots
+print(p1_WHO5)
+print(p2_WHO5)
+print(p3_WHO5)
+print(p4_WHO5)
+print(p5_WHO5)
+
+```
+
+Now, we visualize the WHO5 result for all kids in our sample 
+
+```{r}
+WHO5_data <- mental_wellbeing_data   %>%
+  rowwise() %>%
+  mutate(WHO5_value = (who5_21a + who5_21b + who5_21c + who5_21d + who5_21e) * 4) %>%
+  ungroup()
+
+# Create a summary dataset with unique Kids_ID and their WHO5_value
+WHO5_data <- WHO5_data %>%
+  select(Kids_ID, WHO5_value) %>%
+  distinct(Kids_ID, .keep_all = TRUE)
+
+# Plot
+ggplot(WHO5_data, aes(x = factor(Kids_ID), y = WHO5_value, fill = WHO5_value < 28)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "blue", size = 1) +
+  geom_hline(yintercept = 28, linetype = "dashed", color = "red", size = 1) +
+  scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "steelblue")) +
+  labs(title = "WHO5 Value by Kids_ID",
+       x = "Kids ID",
+       y = "WHO5 Value",
+       caption = "Red bars indicate indicative of depression.") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+```
+join WHO5 values into mental_wellbeing_data for further analysis
+```{r}
+mental_wellbeing_data <- mental_wellbeing_data %>%
+  left_join(WHO5_data %>% select(Kids_ID, WHO5_value), by = "Kids_ID")
+```
+
+Please note that even though data preparation is done for WHO5, this indicator is not used in statistical testing of this study due to time limitations
+
+----------------------------------------------------------------------------------------------------------------------
+
+now we visualise GAD-7 data. This section involves variables gad_22a	gad_22b	gad_22c	gad_22d	gad_22e	gad_22f	gad_22g
+
+```{r}
+
+
+# Function to plot a bar plot for GAD-7 answers
+GAD7_plot <- function(mental_wellbeing_data, column_name, title) {
+  ggplot(mental_wellbeing_data, aes(x=factor(mental_wellbeing_data[[column_name]], labels=c("Not at all", "Several days", "Over half the days", "Nearly everyday")))) +
+    geom_bar(fill="steelblue") +
+    labs(title=title, x="Frequency", y="Count") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 46, hjust = 1))
+}
+
+# Plot bar plots for each variable
+p1_GAD7 <- GAD7_plot(mental_wellbeing_data, "gad_22a", "Feeling nervous, anxious, or on edge")
+p2_GAD7 <- GAD7_plot(mental_wellbeing_data, "gad_22b", "Not being able to stop or control worrying")
+p3_GAD7 <- GAD7_plot(mental_wellbeing_data, "gad_22c", "Worrying too much about different things")
+p4_GAD7 <- GAD7_plot(mental_wellbeing_data, "gad_22d", "Trouble relaxing")
+p5_GAD7 <- GAD7_plot(mental_wellbeing_data, "gad_22e", "Being so restless that it's hard to sit still")
+p6_GAD7 <- GAD7_plot(mental_wellbeing_data, "gad_22f", "Becoming easily annoyed or irritable")
+p7_GAD7 <- GAD7_plot(mental_wellbeing_data, "gad_22g", "Feeling afraid as if something awful might happen")
+
+# Print the plots
+print(p1_GAD7)
+print(p2_GAD7)
+print(p3_GAD7)
+print(p4_GAD7)
+print(p5_GAD7)
+print(p6_GAD7)
+print(p7_GAD7)
+```
+
+create the plot for GAD-7 before adjusting the number of levels 
+```{r}
+GAD7_data <- mental_wellbeing_data %>%
+  rowwise() %>%
+  mutate(GAD7_value = sum(c(gad_22a, gad_22b, gad_22c, gad_22d, gad_22e, gad_22f, gad_22g), na.rm = TRUE)) %>%
+  ungroup() %>%
+  select(record_id, Kids_ID, GAD7_value) %>%
+  distinct(Kids_ID, .keep_all = TRUE)
+
+GAD7_data <- GAD7_data %>%
+  mutate(anxiety_level = case_when(
+    GAD7_value < 5 ~ "Below Mild",
+    GAD7_value >= 5 & GAD7_value < 10 ~ "Mild",
+    GAD7_value >= 10 & GAD7_value < 15 ~ "Moderate",
+    GAD7_value >= 15 ~ "Severe"
+  ))
+
+GAD7_data <- GAD7_data %>%
+  mutate(record_id = factor(record_id, levels = GAD7_data$record_id[order(-GAD7_value)]))
+
+# Create a bar plot with unique colors for each anxiety level
+GAD7_plot <- ggplot(GAD7_data, aes(x = factor(record_id), y = GAD7_value, fill = anxiety_level)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c(
+    "Below Mild" = "lightblue",
+    "Mild" = "yellow",
+    "Moderate" = "orange",
+    "Severe" = "red"
+  )) +
+  geom_hline(yintercept = 5, linetype = "dashed", color = "blue", size = 1) +
+  geom_hline(yintercept = 10, linetype = "dashed", color = "orange", size = 1) +
+  geom_hline(yintercept = 15, linetype = "dashed", color = "red", size = 1) +
+  labs(x = "Record ID",
+       y = "GAD7 Score",
+       fill = "Anxiety Level") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"))
+
+ggsave(filename = "GAD7_scores_distribution.png", 
+       plot = GAD7_plot,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+GAD7_plot
+```
+
+get the min, max and mean for GAD-7 values
+```{r}
+anxiety_stats <- GAD7_data %>%
+  summarise(
+    min_GAD7 = min(GAD7_value),
+    max_GAD7 = max(GAD7_value),
+    mean_GAD7 = mean(GAD7_value)
+  )
+
+anxiety_stats
+```
+
+plot the number of observations under each level 
+```{r}
+anxiety_counts <- GAD7_data %>%
+  count(anxiety_level) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Visualize the bar plot for each anxiety level showing number and percentage
+anxiety_level_plot <- ggplot(anxiety_counts, aes(x = anxiety_level, y = n, fill = anxiety_level)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(n, "(", sprintf("%.2f%%", Percentage), ")", sep = "")),
+            position = position_dodge(width = 0.9), vjust = -0.25) +
+  scale_fill_manual(values = c(
+    "Below Mild" = "lightblue",
+    "Mild" = "yellow",
+    "Moderate" = "orange",
+    "Severe" = "red"
+  )) +
+  labs(x = "Anxiety Level",
+       y = "Number of Observations") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"),
+        legend.position = "none")  
+
+# Display the plot
+print(anxiety_level_plot)
+
+# Save the plot
+ggsave(filename = "GAD7_anxiety_level_distribution.png", 
+       plot = anxiety_level_plot,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+```
+
+
+Print kids who fall into Severe
+```{r}
+severe_anxiety_kids <- GAD7_data %>%
+  filter(anxiety_level == "Severe")
+
+print(severe_anxiety_kids)
+
+```
+
+
+We need to create a new factor called anxiety_level_bi, and use 8 as the cut-off point. The purpose of this operation is lowering the number of levels for Anxiety. After this operation, Anxiety will only have 2 levels. 
+```{r}
+
+GAD7_data <- GAD7_data %>%
+  mutate(anxiety_level_bi = ifelse(GAD7_value >= 8, "Anxiety", "No Anxiety"))
+
+GAD7_data
+```
+
+Join GAD7_data into mental_wellbeing_data
+```{r}
+mental_wellbeing_data <- mental_wellbeing_data %>%
+  left_join(GAD7_data %>% select(Kids_ID, GAD7_value, anxiety_level, anxiety_level_bi), by = "Kids_ID")
+```
+
+create the plot for PHQ-9 before adjusting the number of levels 
+
+```{r}
+
+# Calculate PHQ-9 total score for each Kids_ID
+PHQ9_data <- mental_wellbeing_data %>%
+  rowwise() %>%
+  mutate(PHQ9_value = sum(c(pleasure, depress, sleep, fatigue, satiety, negative, concentration, motion_speech, suicide_ideation), na.rm = TRUE)) %>%
+  ungroup() %>%
+  select(record_id, Kids_ID, PHQ9_value) %>%
+  distinct(Kids_ID, .keep_all = TRUE)
+
+# Categorize PHQ-9 total scores into depression severity levels
+PHQ9_data <- PHQ9_data %>%
+  mutate(depression_level = case_when(
+    PHQ9_value <= 4 ~ "Minimal",
+    PHQ9_value >= 5 & PHQ9_value <= 9 ~ "Mild",
+    PHQ9_value >= 10 & PHQ9_value <= 14 ~ "Moderate",
+    PHQ9_value >= 15 & PHQ9_value <= 19 ~ "Moderately severe",
+    PHQ9_value >= 20 ~ "Severe"
+  ))
+
+PHQ9_data <- PHQ9_data %>%
+  mutate(record_id = factor(record_id, levels = PHQ9_data$record_id[order(-PHQ9_value)]))
+
+# Create a bar plot with unique colors for each depression level
+PHQ9_plot <- ggplot(PHQ9_data, aes(x = factor(record_id), y = PHQ9_value, fill = depression_level)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c(
+    "Minimal" = "lightgreen",
+    "Mild" = "yellow",
+    "Moderate" = "orange",
+    "Moderately severe" = "darkorange",
+    "Severe" = "red"
+  )) +
+  geom_hline(yintercept = 5, linetype = "dashed", color = "blue", size = 1) +
+  geom_hline(yintercept = 10, linetype = "dashed", color = "orange", size = 1) +
+  geom_hline(yintercept = 15, linetype = "dashed", color = "darkorange", size = 1) +
+  geom_hline(yintercept = 20, linetype = "dashed", color = "red", size = 1) +
+  labs(x = "Record ID",
+       y = "PHQ-9 Score",
+       fill = "Depression Level") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"))
+
+# Save the plot
+ggsave(filename = "PHQ9_scores_distribution.png", 
+       plot = PHQ9_plot,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+
+```
+
+Now, we print the most conerning kids
+```{r}
+
+severe_depression_kids <- PHQ9_data %>%
+  filter(depression_level == "Severe")
+
+print(severe_depression_kids)
+
+```
+
+now, we calculate the min, max and mean for PHQ-9 data
+```{r}
+PHQ9_stats <- PHQ9_data %>%
+  summarise(
+    min_PHQ9 = min(PHQ9_value),
+    max_PHQ9 = max(PHQ9_value),
+    mean_PHQ9 = mean(PHQ9_value)
+  )
+PHQ9_stats
+```
+
+we can also visualise the number of observations under each level. apparently, some levels have two few observations. therefore, we need to reduce the number of levels for Depression 
+```{r}
+PHQ9_data$depression_level <- factor(PHQ9_data$depression_level, 
+                                     levels = c("Minimal", "Mild", "Moderate", "Moderately severe", "Severe"))
+
+# Count the number of observations for each depression level and calculate the percentage
+depression_counts <- PHQ9_data %>%
+  count(depression_level) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Visualize the bar plot for each depression level showing number and percentage
+depression_level_plot <- ggplot(depression_counts, aes(x = depression_level, y = n, fill = depression_level)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(n, "(", sprintf("%.2f%%", Percentage), ")", sep = "")),
+            position = position_dodge(width = 0.9), vjust = -0.25) +
+  scale_fill_manual(values = c(
+    "Minimal" = "lightgreen",
+    "Mild" = "yellow",
+    "Moderate" = "orange",
+    "Moderately severe" = "darkorange",
+    "Severe" = "red"
+  )) +
+  labs(x = "Depression Level",
+       y = "Number of Observations") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"),
+        legend.position = "none")  
+
+# Display the plot
+print(depression_level_plot)
+
+# Save the plot
+ggsave(filename = "PHQ9_depression_level_distribution.png", 
+       plot = depression_level_plot,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+```
+
+
+Just like GAD-7, PHQ-9 levels also need to be restructured, with the cut-point of 10
+```{r}
+PHQ9_data <- PHQ9_data %>%
+  mutate(depression_level_bi = ifelse(PHQ9_value >= 10, "Depression", "No Depression"))
+
+PHQ9_data
+```
+
+
+To visualise for PHQ-9 after adjusting the number of levels 
+
+```{r}
+# Create a bar plot with unique colors for each depression_level_bi
+PHQ9_plot_bi <- ggplot(PHQ9_data, aes(x = factor(record_id), y = PHQ9_value, fill = depression_level_bi)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c(
+    "Depression" = "red",
+    "No Depression" = "lightblue"
+  )) +
+  geom_hline(yintercept = 10, linetype = "dashed", color = "black", size = 1) +
+  labs(x = "Record ID",
+       y = "PHQ9 Score",
+       fill = "Depression Level Binary") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"))
+
+# Save the plot
+ggsave(filename = "PHQ9_scores_binary_distribution.png", 
+       plot = PHQ9_plot_bi,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+# Display the plot
+PHQ9_plot_bi
+
+```
+
+
+```{r}
+# Join PHQ9_data into mental_wellbeing_data based on Kids_ID
+mental_wellbeing_data <- mental_wellbeing_data %>%
+  left_join(PHQ9_data %>% select(Kids_ID, PHQ9_value, depression_level, depression_level_bi), by = "Kids_ID")
+```
+
+----------------------------------------------------------------------------------------------------------------------
+
+Now, we explore the distribution of each answer for ASQ data. Since ASQ does not have clear cut-off points, this study does not investigate further. 
+
+```{r}
+# Function to plot a histogram for a given ASQ column in the dataframe
+ASQ_plot <- function(mental_wellbeing_data, column_name, title, labels) {
+  ggplot(mental_wellbeing_data, aes(x=factor(mental_wellbeing_data[[column_name]], levels = 1:5, labels = labels))) +
+    geom_bar(fill="steelblue") +
+    labs(title=title, x="", y="Count") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 46, hjust = 1))
+}
+
+# Labels for the asq_a_29_* variables (A)
+labels_a <- c("Almost all of the time", "A lot of the time", "Some of the time", "A little of the time", "Hardly ever")
+
+# Labels for the asq_b_30_* variables (B)
+labels_b <- c("Strongly agree", "Agree", "Neither agree nor disagree", "Disagree", "Strongly disagree")
+
+# Plot histograms for each ASQ variable
+p1_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_a_29_a", "1. I am able to stand up for myself and what I believe in", labels_a)
+p2_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_a_29_b", "2. How I feel about myself depends on what others think of me", labels_a)
+p3_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_a_29_c", "3. I feel I can be myself around other people", labels_a)
+p4_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_a_29_d", "4. I make an effort to look good", labels_a)
+p5_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_a_29_e", "5. Overall I feel good about my abilities compared to others", labels_a)
+p6_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_a_29_f", "6. If I make an innocent mistake I let it get me down", labels_a)
+p7_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_a_29_g", "7. I feel useless", labels_a)
+p8_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_b_30_a", "8. Overall I like who I am", labels_b)
+p9_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_b_30_b", "9. I am a good person who has a lot to offer", labels_b)
+p10_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_b_30_c", "10. I feel that I am a valuable person who is at least equal to other people", labels_b)
+p11_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_b_30_d", "11. How I feel about my body makes me feel less confident", labels_b)
+p12_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_b_30_e", "12. I feel confident in my abilities to achieve the things I set my mind to", labels_b)
+p13_ASQ <- ASQ_plot(mental_wellbeing_data, "asq_b_30_f", "13. I think other people like me", labels_b)
+
+# Print the ASQ plots
+print(p1_ASQ)
+print(p2_ASQ)
+print(p3_ASQ)
+print(p4_ASQ)
+print(p5_ASQ)
+print(p6_ASQ)
+print(p7_ASQ)
+print(p8_ASQ)
+print(p9_ASQ)
+print(p10_ASQ)
+print(p11_ASQ)
+print(p12_ASQ)
+print(p13_ASQ)
+
+
+```
+
+----------------------------------------------------------------------------------------------------------------------
+
+Now, we can merge all the existing data summurised from Well-being EDA, demo_EDA and Sleep_data_wrangling
+```{r}
+mental_wellbeing_summary <- select(mental_wellbeing_data, 
+                                   Kids_ID, 
+                                   WHO5_value, 
+                                   GAD7_value, 
+                                   anxiety_level, 
+                                   anxiety_level_bi,
+                                   PHQ9_value, 
+                                   depression_level,
+                                   depression_level_bi)
+wellbeing_demo2024 <- merge(mental_wellbeing_summary, demo_data2024, by = "Kids_ID")
+wellbeing_demo_sleep2024 <- merge(sleep_hours_schoolday, wellbeing_demo2024, by = "Kids_ID") 
+wellbeing_demo_sleep2024
+```
+
+
+We can perform some further analysis without incorporating app-specific data. Here we can perform pair-wise Chi-squared test on "Underslept", "Gender", "Ethnic.group", "Decile_group", "anxiety_level_bi " and "depression_level_bi" to see if there is any significant association
+
+we can find 5 pairs show significant association: 
+
+```{r}
+variables <- c("Underslept", "Gender", "Ethnic.group", "Decile_group", "anxiety_level_bi", "depression_level_bi")
+
+# Initialize a matrix to store p-values
+p_value_matrix <- matrix(nrow = length(variables), ncol = length(variables), 
+                         dimnames = list(variables, variables))
+
+# create a loop to calculate p-values for each pair of variables
+for (i in 1:length(variables)) {
+  for (j in 1:length(variables)) {
+    if (i != j) {
+      # Ensure both variables are factors for Chi-squared test
+      var1 <- factor(wellbeing_demo_sleep2024[[variables[i]]])
+      var2 <- factor(wellbeing_demo_sleep2024[[variables[j]]])
+      # Perform Chi-squared test
+      test_result <- tryCatch({
+        chisq.test(var1, var2)
+      }, error = function(e) {
+        # Return NA for p-value if the test fails
+        return(list(p.value = NA))
+      })
+      # Store the p-value in the matrix
+      p_value_matrix[i, j] <- test_result$p.value
+    } else {
+      # finally, we exclude scenarios where a variable is compared to itself
+      p_value_matrix[i, j] <- NA
+    }
+  }
+}
+
+# Output the result
+print(p_value_matrix)
+```
+
+print the pairs of catagorical with significant correlation
+```{r}
+
+for (i in 1:(nrow(p_value_matrix) - 1)) 
+  for (j in (i + 1):ncol(p_value_matrix)) 
+    if (p_value_matrix[i, j] < 0.05) 
+      # Print only the variable pairs that have a significant association
+      cat(variables[i], "and", variables[j], "\n")
+
+```

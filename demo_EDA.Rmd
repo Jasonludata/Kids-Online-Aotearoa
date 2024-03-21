@@ -1,0 +1,251 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+---
+title: "demo_EDA"
+author: "Jason Lu"
+date: "2024-02-04"
+output: html_document
+
+
+----------------------------------------------------------------------------------------------------------------------
+```{r}
+library(ggplot2)
+library(dplyr)
+```
+
+
+
+
+First of all, I select all the kids that have been participated in Kids Online so far. This include 17 kids in Kodie's study, 46 kids in my study, and 30 kids that have not yet been studied. Altogether there are 93 records. 
+
+We should note that the public health school provided a spreadsheet containing information of 94 kids. However, Rar42 did not participate in Kids Online even though his demographic information has been collected. Therefore, I removed his information to ensure that the demo_EDA accurately reflects the population of children who actually participated in Kids Online 
+
+```{r}
+file_path_demo <- "C:/Users/Jason/OneDrive/桌面/501/Re_ Request for Demographic Dataset and Questionnaire for Thesis Research/RQ3/demo.csv"
+
+# Read the demo data
+demo_data <- read.csv(file_path_demo)
+
+
+# Remove Rar42
+demo_data <- demo_data[demo_data$Kids_ID != "Rar42 Did Not Participate", ]
+
+
+demo_data
+```
+
+First, we need to determine if the existing 93 records fairly reflect the demographics of kids in New Zealand. 
+
+Here, we explore socioeconomic status, gender, and ethnicity. This study does not investigate other information provided by the public health department, which includes date of birth, weight, and height.   
+
+----------------------------------------------------------------------------------------------------------------------
+
+1, socio-economic status
+
+We are utilizing school decile rankings as our primary indicator. According to the Ministry of Education, a school’s decile is a measurement of the extent to which a school’s students live in low socioeconomic families. This approach can be justified because school deciles is based on census data and can provide a reliable measure of the socioeconomic status of students.
+
+```{r}
+hist(demo_data$Decile)
+```
+
+The histogram of school deciles shows the 93 kids over represent schools with mid to high deciles. The skewness in this distribution suggests that the existing records differ from the broader population in terms of socioeconomic status.
+
+
+```{r}
+gender_counts <- table(demo_data$Gender)
+gender_counts
+```
+In terms of gender, the exising record seems to have a sound representation of the population. 
+
+----------------------------------------------------------------------------------------------------------------------
+
+Finally, we assess the percentage of different ethnic groups for the 93 participants. Instead of directly using the ethnicity values in the demographic data frame, this study refers to Kids Online Aotearoa 2021-2023 Data Collection Protocol and use three study groups for ethnicity: Māori, Pacific, & non-Māori/non Pacific. 
+
+The Data Collection Protocol defines Māori as Māori or prioritised Māori, and Pacific as Pacific or prioritized Pacific and non-Māori.In this study, the categorical variable Ethnic.group is manually coded following this principle. 
+
+```{r}
+Ethnic_group_count <- table(demo_data$Ethnic.group)
+
+total_count <- sum(Ethnic_group_count)
+maori_percentage <- 100 * Ethnic_group_count["Maori"] / total_count
+pacific_percentage <- 100 * Ethnic_group_count["Pacific"] / total_count
+
+print(paste("Percentage of Maori:", maori_percentage))
+print(paste("Percentage of Pacific Islander:", pacific_percentage))
+```
+Based on the information from the Growing Up in New Zealand study, as of April 5, 2023, children of Māori descent constitute 22.4% of the population aged 12 years, while Pacific children account for 16.7% of this age group. 
+
+
+This summary indicates that in the existing data of 93 participants, both Māori and Pacific children are  underrepresented in proportion to their respective populations. 
+
+----------------------------------------------------------------------------------------------------------------------
+
+Next, we select the 46 kids in this study, repeat the EDA procedures 
+
+```{r}
+ids_to_select <- c(
+  "Avalon19", "Avalon20", "Avalon21", "Avalon22", "Sacredheart24",
+  "Sacredheart25", "Swis26", "Swis27", "Swis28", "Ferg29", "Ferg30",
+  "Ferg31", "Rar32", "Rar33", "Rar34", "Rar36", "Rar37", "Rar38",
+  "Rar39", "Rar40", "Rar41", "Rkur43", "Rkur46", "Rkur47", "Rkur48",
+  "Rkur49", "Rkur50", "Rkur52", "Brook53", "Brook54", "Brook55",
+  "Brook56", "Brook57", "Brook58", "Otari60", "Otari61", "Papa62",
+  "Papa63", "Swis64", "Swis65", "Swis67", "Swis69", "Swis70", "Swis71",
+  "Swis72", "Ourlady73"
+)
+
+demo_data2024 <- demo_data[demo_data$Kids_ID %in% ids_to_select, ]
+
+print(demo_data2024)
+
+```
+
+
+
+```{r}
+
+decile_counts <- demo_data2024 %>%
+  count(Decile) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Creating the plot for Decile distribution
+decile_plot <- ggplot(decile_counts, aes(x = as.factor(Decile), y = n, fill = Decile)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(n, "(", sprintf("%.2f%%", Percentage), ")", sep = "")),
+            position = position_dodge(width = 0.9), vjust = -0.25) +
+  labs(y = "Count", x = "Decile") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white")) +
+  scale_x_discrete(limits = as.character(1:10)) 
+
+ggsave(filename = "decile_distribution_plot.png", 
+       plot = decile_plot,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+
+```
+
+
+The distribution of school deciles for the 46 kids in the 2024 study uncovers an overrepresentation of schools with mid to high deciles. The skewness in this distribution suggests that this sample differs from the broader population in terms of socio-economic status.
+
+Given the overrepresentation of high-decile kids in our sample, we will adjust the categorization cut-off points for the decile group to achieve a more equitable distribution across groups. Specifically, we will use a higher cut-off point for the mid-decile group to include what might typically be considered high-decile values. This approach will help mitigate the skewness caused by the overrepresentation and allow for a more nuanced analysis. We will define low-decile as deciles 1-4, mid-decile as deciles 5-8, and high-decile as deciles 9-10. While unconventional, this categorization is tailored to our sample’s unique composition.
+
+```{r}
+demo_data2024$Decile_group <- cut(demo_data2024$Decile, 
+                                  breaks = c(0, 5, 9, 10), 
+                                  labels = c("low-decile", "mid-decile", "high-decile"), 
+                                  include.lowest = TRUE)
+
+decile_group_counts_2024 <- table(demo_data2024$Decile_group)
+decile_group_counts_2024
+```
+
+----------------------------------------------------------------------------------------------------------------------
+
+```{r}
+gender_counts_2024 <- table(demo_data2024$Gender)
+gender_counts_2024
+```
+Plot for gender distribution
+```{r}
+
+gender_counts <- demo_data2024 %>%
+  count(Gender) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+gender_plot <- ggplot(gender_counts, aes(x = Gender, y = n, fill = Gender)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(n, "(", sprintf("%.2f%%", Percentage), ")", sep = "")), 
+            position = position_dodge(width = 0.9), vjust = -0.25) +
+  labs(y = "Count", x = "Gender") +
+  theme_minimal()+
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"),
+        legend.position = "none") 
+
+ggsave(filename = "gender_distribution_plot.png", 
+       plot = gender_plot, 
+       width = 8, height = 6, unit = "in", 
+       dpi = 300) 
+
+```
+
+
+----------------------------------------------------------------------------------------------------------------------
+
+
+```{r}
+Ethnic_group_count_2024 <- table(demo_data2024$Ethnic.group)
+
+total_count_2024 <- sum(Ethnic_group_count_2024)
+maori_percentage_2024 <- 100 * Ethnic_group_count_2024["Maori"] / total_count_2024
+pacific_percentage_2024 <- 100 * Ethnic_group_count_2024["Pacific"] / total_count_2024
+
+print(paste("Percentage of Maori:", maori_percentage_2024))
+print(paste("Percentage of Pacific Islander:", pacific_percentage_2024))
+```
+
+Both Gender and Ethnic group in the 2024 study are fairly represented in proportion to their respective populations among all children in New Zealand. 
+
+
+```{r}
+
+ethnic_group_counts <- demo_data2024 %>%
+  count(Ethnic.group) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Creating the plot for ethnic_group distribution
+ethnic_group_plot <- ggplot(ethnic_group_counts, aes(x = Ethnic.group, y = n, fill = Ethnic.group)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(n, "(", sprintf("%.2f%%", Percentage), ")", sep = "")),
+            position = position_dodge(width = 0.9), vjust = -0.25) +
+  labs(y = "Count", x = "Ethnic Group") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"),
+        legend.position = "none") 
+
+# Save the plot 
+ggsave(filename = "ethnic_group_distribution_plot.png", 
+       plot = ethnic_group_plot, 
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+```
+
+
+----------------------------------------------------------------------------------------------------------------------
+
+
+```{r}
+decile_group_counts <- demo_data2024 %>%
+  count(Decile_group) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Creating the plot for Decile_group distribution
+decile_group_plot <- ggplot(decile_group_counts, aes(x = as.factor(Decile_group), y = n, fill = as.factor(Decile_group))) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(n, "(", sprintf("%.2f%%", Percentage), ")", sep = "")),
+            position = position_dodge(width = 0.9), vjust = -0.25) +
+  labs(y = "Count", x = "Decile Group") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white", colour = "white"), 
+        plot.background = element_rect(fill = "white", colour = "white"),
+        legend.position = "none")  +
+  scale_fill_discrete(name = "Decile Group")
+
+# Save the plot 
+ggsave(filename = "decile_group_distribution_plot.png", 
+       plot = decile_group_plot,
+       width = 8, height = 6, unit = "in", 
+       dpi = 300)
+
+```
+
+----------------------------------------------------------------------------------------------------------------------
+
